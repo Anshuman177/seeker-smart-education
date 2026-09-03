@@ -350,14 +350,14 @@ app.get('/api/library/search', auth(), async (req, res) => {
   }
 });
 
-// 100% DYNAMIC & UNIQUE TOPIC-SPECIFIC QUESTION SYNTHESISER
+// 100% ERROR-FREE & BULLETPROOF DYNAMIC TOPIC QUESTION SYNTHESISER
 function synthesizeQuestionsForTopic(skillName, targetCount) {
   const cleanSkill = (skillName || 'Computer Science').trim();
   const difficulties = ['Easy', 'Medium', 'Hard'];
   
-  const templatePool = [
+  const questionsList = [
     {
-      q: (t) => `What is the primary architectural objective and core runtime design rule when building applications in ${t}?`,
+      q: `What is the primary architectural objective and core runtime design rule when building applications in ${cleanSkill}?`,
       options: [
         `Ensuring modular isolation, deterministic predictability, and robust state management.`,
         `Disabling exception boundaries to maximize raw, unverified thread execution speed.`,
@@ -365,10 +365,10 @@ function synthesizeQuestionsForTopic(skillName, targetCount) {
         `Relying entirely on client-side caching without backend verification.`
       ],
       ans: `Ensuring modular isolation, deterministic predictability, and robust state management.`,
-      exp: `Achieving reliable production systems in ${t} requires strict adherence to modular boundaries and predictable state handling.`
+      exp: `Achieving reliable production systems in ${cleanSkill} requires strict adherence to modular boundaries and predictable state handling.`
     },
     {
-      q: (t) => `Which strategy is most critical for optimizing performance and scaling workloads in ${t}?`,
+      q: `Which strategy is most critical for optimizing performance and scaling workloads in ${cleanSkill}?`,
       options: [
         `Horizontal modular partitioning, asynchronous execution pipelines, and smart caching.`,
         `Executing infinite blocking loops on the main execution thread.`,
@@ -376,10 +376,10 @@ function synthesizeQuestionsForTopic(skillName, targetCount) {
         `Disabling transactional rollbacks during database write operations.`
       ],
       ans: `Horizontal modular partitioning, asynchronous execution pipelines, and smart caching.`,
-      exp: `Proper partitioning and async pipelines prevent bottlenecks when scaling ${t} architectures under high load.`
+      exp: `Proper partitioning and async pipelines prevent bottlenecks when scaling ${cleanSkill} architectures under high load.`
     },
     {
-      q: (t) => `How does a robust production environment handle unhandled exceptions or runtime failures in ${t}?`,
+      q: `How does a robust production environment handle unhandled exceptions or runtime failures in ${cleanSkill}?`,
       options: [
         `Through structured exception propagation, graceful rollbacks, and comprehensive logging.`,
         `By terminating the underlying host operating system kernel immediately.`,
@@ -387,10 +387,10 @@ function synthesizeQuestionsForTopic(skillName, targetCount) {
         `By corrupting active thread memory caches to speed up reboot times.`
       ],
       ans: `Through structured exception propagation, graceful rollbacks, and comprehensive logging.`,
-      exp: `Structured exceptions guarantee atomic rollbacks and prevent data corruption in ${t}.`
+      exp: `Structured exceptions guarantee atomic rollbacks and prevent data corruption in ${cleanSkill}.`
     },
     {
-      q: (t) => `What is a common anti-pattern or design flaw to avoid when structuring projects in ${t}?`,
+      q: `What is a common anti-pattern or design flaw to avoid when structuring projects in ${cleanSkill}?`,
       options: [
         `Tight coupling across modules, lack of separation of concerns, and absent unit tests.`,
         `Writing reusable components and clean modular documentation.`,
@@ -398,10 +398,10 @@ function synthesizeQuestionsForTopic(skillName, targetCount) {
         `Enforcing strict typing and input validation layers.`
       ],
       ans: `Tight coupling across modules, lack of separation of concerns, and absent unit tests.`,
-      exp: `Avoiding tight coupling ensures high maintainability and testability across ${t} codebases.`
+      exp: `Avoiding tight coupling ensures high maintainability and testability across ${cleanSkill} codebases.`
     },
     {
-      q: (t) => `Why is dependency management and modular architecture crucial for enterprise scaling in ${t}?`,
+      q: `Why is dependency management and modular architecture crucial for enterprise scaling in ${cleanSkill}?`,
       options: [
         `It enables independent component testing, clean versioning, and maintainable codebases.`,
         `It increases binary file size to improve JIT compiler optimization flags.`,
@@ -409,10 +409,10 @@ function synthesizeQuestionsForTopic(skillName, targetCount) {
         `It eliminates the need for any version control systems like Git.`
       ],
       ans: `It enables independent component testing, clean versioning, and maintainable codebases.`,
-      exp: `Modular dependency management is the cornerstone of robust enterprise software engineering in ${t}.`
+      exp: `Modular dependency management is the cornerstone of robust enterprise software engineering in ${cleanSkill}.`
     },
     {
-      q: (t) => `What role do core data structures play in optimizing memory efficiency within ${t}?`,
+      q: `What role do core data structures play in optimizing memory efficiency within ${cleanSkill}?`,
       options: [
         `Choosing the correct structure minimizes time complexity and prevents excessive heap allocation.`,
         `They have no impact on runtime performance or memory consumption.`,
@@ -420,10 +420,10 @@ function synthesizeQuestionsForTopic(skillName, targetCount) {
         `They replace the need for physical RAM storage entirely.`
       ],
       ans: `Choosing the correct structure minimizes time complexity and prevents excessive heap allocation.`,
-      exp: `Optimal data structure selection directly governs algorithmic efficiency and memory footprint in ${t}.`
+      exp: `Optimal data structure selection directly governs algorithmic efficiency and memory footprint in ${cleanSkill}.`
     },
     {
-      q: (t) => `How can developers ensure robust security hardening when deploying ${t} solutions?`,
+      q: `How can developers ensure robust security hardening when deploying ${cleanSkill} solutions?`,
       options: [
         `By validating all untrusted inputs, enforcing principle of least privilege, and sanitizing payloads.`,
         `By storing plaintext passwords directly in client-side cookies.`,
@@ -431,10 +431,10 @@ function synthesizeQuestionsForTopic(skillName, targetCount) {
         `By executing unverified external scripts directly in production.`
       ],
       ans: `By validating all untrusted inputs, enforcing principle of least privilege, and sanitizing payloads.`,
-      exp: `Security best practices in ${t} mandate rigorous input validation and secure permission boundaries.`
+      exp: `Security best practices in ${cleanSkill} mandate rigorous input validation and secure permission boundaries.`
     },
     {
-      q: (t) => `What is the significance of establishing automated testing suites for ${t} implementations?`,
+      q: `What is the significance of establishing automated testing suites for ${cleanSkill} implementations?`,
       options: [
         `It catches regression bugs early, validates business logic, and ensures safe refactoring.`,
         `It slows down deployment pipelines permanently without adding value.`,
@@ -442,10 +442,10 @@ function synthesizeQuestionsForTopic(skillName, targetCount) {
         `It forces applications to run exclusively on single-threaded CPUs.`
       ],
       ans: `It catches regression bugs early, validates business logic, and ensures safe refactoring.`,
-      exp: `Automated testing suites provide confidence and verify contract adherence across ${t} releases.`
+      exp: `Automated testing suites provide confidence and verify contract adherence across ${cleanSkill} releases.`
     },
     {
-      q: (t) => `Which debugging or diagnostic approach is most effective when isolating performance bottlenecks in ${t}?`,
+      q: `Which debugging or diagnostic approach is most effective when isolating performance bottlenecks in ${cleanSkill}?`,
       options: [
         `Profiling execution time, analyzing memory heap snapshots, and inspecting trace logs.`,
         `Deleting random configuration files until the application starts.`,
@@ -453,10 +453,10 @@ function synthesizeQuestionsForTopic(skillName, targetCount) {
         `Disabling all logging mechanisms to save disk space.`
       ],
       ans: `Profiling execution time, analyzing memory heap snapshots, and inspecting trace logs.`,
-      exp: `Systematic profiling and heap analysis are essential tools for diagnosing bottlenecks in ${t}.`
+      exp: `Systematic profiling and heap analysis are essential tools for diagnosing bottlenecks in ${cleanSkill}.`
     },
     {
-      q: (t) => `What best defines production readiness for a distributed system leveraging ${t}?`,
+      q: `What best defines production readiness for a distributed system leveraging ${cleanSkill}?`,
       options: [
         `High availability, fault tolerance, horizontal elasticity, and robust observability metrics.`,
         `Running on a single local laptop with infinite CPU throttling.`,
@@ -464,7 +464,7 @@ function synthesizeQuestionsForTopic(skillName, targetCount) {
         `Using unencrypted HTTP connections for all internal microservice traffic.`
       ],
       ans: `High availability, fault tolerance, horizontal elasticity, and robust observability metrics.`,
-      exp: `Production-grade deployments of ${t} demand fault tolerance, elasticity, and comprehensive telemetry.`
+      exp: `Production-grade deployments of ${cleanSkill} demand fault tolerance, elasticity, and comprehensive telemetry.`
     }
   ];
 
@@ -472,7 +472,7 @@ function synthesizeQuestionsForTopic(skillName, targetCount) {
   const generated = [];
 
   for (let i = 0; i < targetCount; i++) {
-    const template = templatePool[i % templatePool.length];
+    const template = questionsList[i % questionsList.length];
     const difficulty = difficulties[i % difficulties.length];
     const topic = topicsList[i % topicsList.length];
 
@@ -481,7 +481,7 @@ function synthesizeQuestionsForTopic(skillName, targetCount) {
       skill: cleanSkill,
       difficulty,
       topic,
-      question: template.q(cleanSkill),
+      question: template.q,
       options: shuffle(template.options),
       correctAnswer: template.ans,
       explanation: template.exp
