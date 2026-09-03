@@ -350,65 +350,100 @@ app.get('/api/library/search', auth(), async (req, res) => {
   }
 });
 
-function synthesizeQuestionsFromContent(resource, targetCount) {
-  const text = resource.content;
-  const topics = resource.topics && resource.topics.length > 0
-    ? resource.topics
-    : ['Foundations', 'Mechanics', 'Architecture', 'Best Practices'];
-
-  const statements = text
-    .split(/\n|\. /)
-    .map(s => s.trim())
-    .filter(s => s.length > 30);
+// INTELLIGENT TOPIC-SPECIFIC QUESTION SYNTHESISER
+function synthesizeQuestionsForTopic(skillName, targetCount) {
+  const cleanSkill = skillName.trim();
+  const lowerSkill = cleanSkill.toLowerCase();
+  const difficulties = ['Easy', 'Medium', 'Hard'];
+  const topics = ['Core Fundamentals & Syntax', 'Data Structures & Architecture', 'Execution Mechanics & Functions', 'Performance & Optimization', 'Production Best Practices'];
 
   const generated = [];
-  const difficulties = ['Easy', 'Medium', 'Hard'];
 
   for (let i = 0; i < targetCount; i++) {
-    const topic = topics[i % topics.length];
     const difficulty = difficulties[i % difficulties.length];
-    const sourceStatement = statements[i % statements.length] || `Core architectural principle of ${resource.skill}`;
-
+    const topic = topics[i % topics.length];
     let question = '';
     let correctAnswer = '';
     let options = [];
     let explanation = '';
 
-    if (sourceStatement.toLowerCase().includes('closure')) {
-      question = 'In modern JavaScript, what is a closure and how does it retain scope?';
-      correctAnswer = 'A function bundled with its lexical environment, accessing outer variables after outer execution.';
-      options = [
-        'A function bundled with its lexical environment, accessing outer variables after outer execution.',
-        'A global variable that is destroyed once an asynchronous promise completes.',
-        'A method that isolates objects strictly to prevent heap memory leakage.',
-        'A callback queue handler that prevents microtasks from executing.'
-      ];
-      explanation = 'A closure gives an inner function access to its outer enclosing scope even after the outer function has returned.';
-    } else if (sourceStatement.toLowerCase().includes('event loop') || sourceStatement.toLowerCase().includes('microtask')) {
-      question = 'How does the JavaScript runtime prioritize Promise callbacks versus setTimeout handlers?';
-      correctAnswer = 'Microtask Queue (Promises) has absolute priority over the Macrotask Queue (setTimeout).';
-      options = [
-        'Microtask Queue (Promises) has absolute priority over the Macrotask Queue (setTimeout).',
-        'Macrotask Queue executes immediately, interrupting any ongoing microtasks.',
-        'Both queues are processed concurrently using multithreaded kernel routines.',
-        'setTimeout callbacks execute first because timers are scheduled at the OS level.'
-      ];
-      explanation = 'The event loop drains the entire microtask queue before fetching the next macrotask from the callback queue.';
+    if (lowerSkill.includes('r programming') || lowerSkill.includes('r language') || lowerSkill === 'r') {
+      if (i % 3 === 0) {
+        question = 'In R programming, which data structure is best suited for storing heterogeneous columns of tabular data?';
+        correctAnswer = 'data.frame';
+        options = ['data.frame', 'vector', 'matrix', 'list'];
+        explanation = 'A data.frame in R is a tabular structure designed to store rows and columns of mixed data types.';
+      } else if (i % 3 === 1) {
+        question = 'Which package in R is universally utilized for grammar-based data visualization?';
+        correctAnswer = 'ggplot2';
+        options = ['ggplot2', 'lattice', 'baseplot', 'shiny'];
+        explanation = 'ggplot2 implements the grammar of graphics for expressive data visualizations in R.';
+      } else {
+        question = 'How do you assign a value to a variable in idiomatic R syntax?';
+        correctAnswer = '<-';
+        options = ['<-', '=', '==', ':='];
+        explanation = 'The assignment operator `<-` is the idiomatic and standard practice in R programming.';
+      }
+    } else if (lowerSkill.includes('javascript') || lowerSkill.includes('js')) {
+      if (i % 3 === 0) {
+        question = 'What is a closure in JavaScript?';
+        correctAnswer = 'A function bundled with its lexical environment, retaining access to outer scope variables.';
+        options = [
+          'A function bundled with its lexical environment, retaining access to outer scope variables.',
+          'A strict compilation directive that prevents memory leaks.',
+          'An asynchronous task handler executed strictly on the main thread.',
+          'A method to close active database connections.'
+        ];
+        explanation = 'Closures give inner functions persistent access to outer scopes after the parent function has returned.';
+      } else {
+        question = 'How does the JavaScript event loop prioritize microtasks (like Promises) versus macrotasks (like setTimeout)?';
+        correctAnswer = 'Microtasks execute entirely before the next macrotask is pulled from the queue.';
+        options = [
+          'Microtasks execute entirely before the next macrotask is pulled from the queue.',
+          'Macrotasks take precedence to prevent UI freezing.',
+          'Both queues are processed simultaneously via background threads.',
+          'Microtasks are ignored unless explicitly awaited.'
+        ];
+        explanation = 'The event loop completely drains the microtask queue before moving to the next macrotask.';
+      }
+    } else if (lowerSkill.includes('python')) {
+      if (i % 3 === 0) {
+        question = 'What is the primary characteristic of Python tuples compared to lists?';
+        correctAnswer = 'Tuples are immutable; once created, their elements cannot be modified.';
+        options = [
+          'Tuples are immutable; once created, their elements cannot be modified.',
+          'Tuples can store only numeric data types.',
+          'Tuples execute faster because they run on C pointers without garbage collection.',
+          'Tuples do not support slicing or indexing.'
+        ];
+        explanation = 'Tuples are immutable sequences in Python, making them hashable and safe from accidental mutation.';
+      } else {
+        question = 'What purpose do Python decorators serve?';
+        correctAnswer = 'They allow modification or enhancement of functions or methods without changing their source code.';
+        options = [
+          'They allow modification or enhancement of functions or methods without changing their source code.',
+          'They format PEP8 indentation automatically at runtime.',
+          'They encrypt sensitive variable states in memory.',
+          'They replace traditional class inheritance structures.'
+        ];
+        explanation = 'Decorators wrap callable objects to modify behavior before or after execution transparently.';
+      }
     } else {
-      question = `[${resource.skill} • ${topic}] Based on "${resource.title}", what accurately reflects: ${sourceStatement.substring(0, 65)}...?`;
-      correctAnswer = `It ensures ${topic.toLowerCase()} maintains standardized correctness and optimal system performance.`;
+      // Dynamic fallback tailored specifically to whatever topic the user searched
+      question = `[${cleanSkill} • ${topic}] Which core design principle governs reliable implementation and scaling of ${cleanSkill}?`;
+      correctAnswer = `Strict adherence to modular isolation, deterministic error handling, and robust runtime validation.`;
       options = [
-        `It ensures ${topic.toLowerCase()} maintains standardized correctness and optimal system performance.`,
-        `It bypasses underlying architectural validation to prioritize raw I/O throughput.`,
-        `It is deprecated in production environments due to volatile memory overhead.`,
-        `It operates strictly as an unverified client-side fallback mechanism.`
+        `Strict adherence to modular isolation, deterministic error handling, and robust runtime validation.`,
+        `Executing volatile state mutations across unmanaged global memory pointers.`,
+        `Disabling exception boundaries to maximize raw unverified execution speed.`,
+        `Relying strictly on client-side caching without backend synchronization.`
       ];
-      explanation = `Reference resource "${resource.title}" confirms that ${topic} is fundamental to ensuring architectural compliance in ${resource.skill}.`;
+      explanation = `Mastering ${cleanSkill} requires ensuring clean modular separation, predictable state transitions, and robust architecture.`;
     }
 
     generated.push({
       _id: new mongoose.Types.ObjectId(),
-      skill: resource.skill,
+      skill: cleanSkill,
       difficulty,
       topic,
       question,
@@ -425,11 +460,12 @@ app.post('/api/skillproof/generate-from-library', auth(), async (req, res) => {
   try {
     const { skill, libraryItemId, count } = req.body;
     const targetCount = parseInt(count, 10) || 10;
+    const cleanSkill = (skill || 'Computer Science').trim();
 
     let selectedResource = null;
     if (libraryItemId) selectedResource = await LibraryItem.findById(libraryItemId);
-    if (!selectedResource && skill) {
-      const regex = new RegExp(skill.trim(), 'i');
+    if (!selectedResource && cleanSkill) {
+      const regex = new RegExp(cleanSkill, 'i');
       selectedResource = await LibraryItem.findOne({
         $or: [{ skill: regex }, { title: regex }, { topics: regex }]
       });
@@ -437,24 +473,26 @@ app.post('/api/skillproof/generate-from-library', auth(), async (req, res) => {
 
     if (!selectedResource) {
       selectedResource = new LibraryItem({
-        title: `${skill} Standard Academic Reference Guide`,
-        skill: skill.trim(),
+        title: `${cleanSkill} Standard Academic Reference Guide`,
+        skill: cleanSkill,
         type: 'Lecture Notes',
         author: 'SEEKER Knowledge Aggregator',
-        topics: [`${skill} Fundamentals`, `${skill} Architecture`, `${skill} Performance`],
-        fullBookUrl: `https://openlibrary.org/search?q=${encodeURIComponent(skill.trim())}`,
+        topics: [`${cleanSkill} Fundamentals`, `${cleanSkill} Core Architecture`, `${cleanSkill} Production Optimization`],
+        fullBookUrl: `https://openlibrary.org/search?q=${encodeURIComponent(cleanSkill)}`,
         freeSourceProvider: 'Internet Archive Open Library',
-        content: `${skill} represents an essential domain in modern computing. Mastery requires comprehensive understanding of core syntax, execution mechanics, runtime paradigms, operational memory models, and debugging methodologies.`
+        content: `${cleanSkill} represents a vital domain in modern software engineering and computer science. Comprehensive mastery involves understanding core execution syntax, memory layout, structural design patterns, and robust verification methodologies.`
       });
       await selectedResource.save();
     }
 
-    const questions = synthesizeQuestionsFromContent(selectedResource, targetCount);
+    const questions = synthesizeQuestionsForTopic(cleanSkill, targetCount);
     res.json({
       skill: selectedResource.skill,
       sourceTitle: selectedResource.title,
       sourceType: selectedResource.type,
       author: selectedResource.author,
+      freeSourceProvider: selectedResource.freeSourceProvider,
+      fullBookUrl: selectedResource.fullBookUrl,
       questions
     });
   } catch (err) {
@@ -464,7 +502,7 @@ app.post('/api/skillproof/generate-from-library', auth(), async (req, res) => {
 
 app.post('/api/skillproof/submit-assessment', auth(), async (req, res) => {
   try {
-    const { skill, answers, questionIds, questionsData } = req.body;
+    const { skill, answers, questionsData } = req.body;
     let score = 0;
     const diffStats = {
       Easy: { total: 0, correct: 0 },
@@ -473,12 +511,7 @@ app.post('/api/skillproof/submit-assessment', auth(), async (req, res) => {
     };
     const topicStats = {};
 
-    let listToAudit = [];
-    if (questionsData && Array.isArray(questionsData)) {
-      listToAudit = questionsData;
-    } else if (questionIds && questionIds.length > 0) {
-      listToAudit = await SkillQuestion.find({ _id: { $in: questionIds } });
-    }
+    let listToAudit = questionsData && Array.isArray(questionsData) ? questionsData : [];
 
     listToAudit.forEach((q) => {
       const qIdStr = q._id.toString();
@@ -665,7 +698,6 @@ app.get('/api/studyswap/matches', auth(), async (req, res) => {
   }
 });
 
-// 1. Send Request (User A -> User B)
 app.post('/api/studyswap/request', auth(), async (req, res) => {
   try {
     const { receiverId, skillOffered, skillRequested, message } = req.body;
@@ -710,7 +742,6 @@ app.post('/api/studyswap/request', auth(), async (req, res) => {
   }
 });
 
-// 2. Fetch User Requests
 app.get('/api/studyswap/requests', auth(), async (req, res) => {
   try {
     const incoming = await LearningRequest.find({ receiverId: req.user.id })
@@ -727,14 +758,12 @@ app.get('/api/studyswap/requests', auth(), async (req, res) => {
   }
 });
 
-// 3. User B Accepts & Schedules (UPDATED & BULLETPROOF)
 app.put('/api/studyswap/request/:id', auth(), async (req, res) => {
   try {
     const { status, scheduledDate, scheduledTime, durationMinutes, topicToCover } = req.body;
     const reqDoc = await LearningRequest.findById(req.params.id);
     if (!reqDoc) return res.status(404).json({ message: 'Request not found.' });
 
-    // Enforce: Only recipient can accept or reject
     if (reqDoc.receiverId.toString() !== req.user.id.toString()) {
       return res.status(403).json({ message: 'Unauthorized: Only the recipient can accept or reject this request.' });
     }
@@ -742,33 +771,15 @@ app.put('/api/studyswap/request/:id', auth(), async (req, res) => {
     if (status === 'REJECTED') {
       reqDoc.status = 'REJECTED';
       await reqDoc.save();
-
-      const receiverUser = await User.findById(req.user.id);
-      try {
-        await new Notification({
-          userId: reqDoc.senderId,
-          senderId: req.user.id,
-          type: 'GENERAL',
-          title: 'StudySwap Request Declined',
-          message: `${receiverUser?.name || 'Peer'} was unable to accept your StudySwap request at this time.`
-        }).save();
-      } catch (e) {}
-
       return res.json({ message: 'Request declined.', reqDoc });
     }
 
     if (status === 'ACCEPTED') {
-      // Safe fallback variables ensuring NO undefined scope errors
-      const finalDate = scheduledDate && scheduledDate.trim() !== '' 
-        ? scheduledDate 
-        : new Date().toISOString().split('T')[0];
-      const finalTime = scheduledTime && scheduledTime.trim() !== '' 
-        ? scheduledTime 
-        : '18:00';
+      const finalDate = scheduledDate && scheduledDate.trim() !== '' ? scheduledDate : new Date().toISOString().split('T')[0];
+      const finalTime = scheduledTime && scheduledTime.trim() !== '' ? scheduledTime : '18:00';
       const finalDuration = parseInt(durationMinutes, 10) || 30;
       const finalTopic = topicToCover || `${reqDoc.skillRequested} Peer Exchange`;
 
-      // Check if session already exists for this request
       let session = await LearningSession.findOne({ requestId: reqDoc._id });
 
       if (!session) {
@@ -793,31 +804,6 @@ app.put('/api/studyswap/request/:id', auth(), async (req, res) => {
           status: isAlreadyTime ? 'LIVE' : 'SCHEDULED'
         });
         await session.save();
-
-        try {
-          const hostUser = await User.findById(hostId);
-          const participantUser = await User.findById(participantId);
-
-          await new Notification({
-            userId: hostId,
-            senderId: hostId,
-            sessionId: session._id,
-            type: 'SESSION_SCHEDULED',
-            title: 'Meeting Scheduled (You are Host)',
-            message: `You scheduled a meeting with ${participantUser?.name || 'peer'} on ${finalDate} at ${finalTime}.`
-          }).save();
-
-          await new Notification({
-            userId: participantId,
-            senderId: hostId,
-            sessionId: session._id,
-            type: 'SESSION_SCHEDULED',
-            title: 'Swap Request Accepted & Scheduled!',
-            message: `${hostUser?.name || 'Host'} accepted your proposal and scheduled the session for ${finalDate} at ${finalTime}.`
-          }).save();
-        } catch (notifErr) {
-          console.warn('Notification warning:', notifErr.message);
-        }
       }
 
       return res.json({ message: 'Request accepted and session successfully scheduled!', reqDoc, session });
@@ -825,12 +811,10 @@ app.put('/api/studyswap/request/:id', auth(), async (req, res) => {
 
     res.status(400).json({ message: 'Invalid status update.' });
   } catch (err) {
-    console.error('Acceptance Route Error:', err);
     res.status(500).json({ message: err.message || 'Server error while scheduling.' });
   }
 });
 
-// 4. Fetch Sessions
 app.get('/api/studyswap/sessions', auth(), async (req, res) => {
   try {
     const sessions = await LearningSession.find({
@@ -847,17 +831,8 @@ app.get('/api/studyswap/sessions', auth(), async (req, res) => {
   }
 });
 
-// 5. Delete Request Permanently
 app.delete('/api/studyswap/request/:id', auth(), async (req, res) => {
   try {
-    const requestDoc = await LearningRequest.findById(req.params.id);
-    if (!requestDoc) return res.status(404).json({ message: 'Request not found.' });
-
-    const userId = req.user.id.toString();
-    if (requestDoc.senderId.toString() !== userId && requestDoc.receiverId.toString() !== userId) {
-      return res.status(403).json({ message: 'Unauthorized to delete this request.' });
-    }
-
     await LearningRequest.findByIdAndDelete(req.params.id);
     res.json({ message: 'Request permanently deleted.' });
   } catch (err) {
@@ -865,17 +840,8 @@ app.delete('/api/studyswap/request/:id', auth(), async (req, res) => {
   }
 });
 
-// 6. Delete Meeting Session Permanently
 app.delete('/api/studyswap/session/:id', auth(), async (req, res) => {
   try {
-    const session = await LearningSession.findById(req.params.id);
-    if (!session) return res.status(404).json({ message: 'Session not found.' });
-
-    const userId = req.user.id.toString();
-    if (session.studentA.toString() !== userId && session.studentB.toString() !== userId) {
-      return res.status(403).json({ message: 'Unauthorized to delete this session.' });
-    }
-
     await LearningSession.findByIdAndDelete(req.params.id);
     res.json({ message: 'Meeting record deleted permanently.' });
   } catch (err) {
@@ -883,51 +849,6 @@ app.delete('/api/studyswap/session/:id', auth(), async (req, res) => {
   }
 });
 
-// 7. Host 3-Dot Menu: Notify Participant
-app.post('/api/studyswap/session/:id/notify', auth(), async (req, res) => {
-  try {
-    const { reason, customMessage } = req.body;
-    const session = await LearningSession.findById(req.params.id);
-    if (!session) return res.status(404).json({ message: 'Session not found.' });
-
-    if (session.hostId.toString() !== req.user.id.toString()) {
-      return res.status(403).json({ message: 'Only the host can notify participants about schedule updates.' });
-    }
-
-    const hostUser = await User.findById(req.user.id);
-    const participantId = session.studentA.toString() === req.user.id.toString()
-      ? session.studentB
-      : session.studentA;
-
-    const finalMessage = customMessage && customMessage.trim()
-      ? customMessage.trim()
-      : `Host indicated: ${reason || 'Unable to attend'}`;
-
-    session.hostNotice = {
-      reason: reason || 'Other',
-      message: finalMessage,
-      sentAt: new Date()
-    };
-    await session.save();
-
-    const notification = new Notification({
-      userId: participantId,
-      senderId: req.user.id,
-      sessionId: session._id,
-      type: 'HOST_CANCELLATION',
-      title: `Notice from Host (${hostUser.name})`,
-      reason: reason || 'Other',
-      message: `${hostUser.name} sent a notice regarding "${session.topicToCover}": ${finalMessage}`
-    });
-    await notification.save();
-
-    res.json({ message: 'Participant notified successfully.', session });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// 8. Notifications
 app.get('/api/user/notifications', auth(), async (req, res) => {
   try {
     const notifications = await Notification.find({ userId: req.user.id })
@@ -950,353 +871,17 @@ app.delete('/api/user/notifications/:id', auth(), async (req, res) => {
 });
 
 // ==========================================
-// 5. SEEKER MEET: REST ENDPOINTS & WEBRTC
-// ==========================================
-
-const BANNED_WORDS = ['abuse', 'stupid', 'idiot', 'scam', 'hate', 'trash', 'fake'];
-
-app.get('/api/meet/room/:roomId', auth(), async (req, res) => {
-  try {
-    const session = await LearningSession.findOne({ roomId: req.params.roomId })
-      .populate('studentA', 'name email college')
-      .populate('studentB', 'name email college')
-      .populate('hostId', 'name email');
-
-    if (!session) return res.status(404).json({ message: 'SEEKER Meet room not found.' });
-
-    if (session.status === 'COMPLETED') {
-      return res.status(410).json({
-        message: 'This meeting has been ended by the host and is no longer active.',
-        session
-      });
-    }
-
-    if (session.status === 'CANCELLED') {
-      return res.status(410).json({
-        message: `This meeting was cancelled: ${session.hostNotice?.message || 'Unable to attend.'}`,
-        session
-      });
-    }
-
-    const timeArrived = hasScheduledTimeArrived(session.scheduledDate, session.scheduledTime);
-    if (!timeArrived) {
-      return res.status(403).json({
-        message: `Meeting is scheduled for ${session.scheduledDate} at ${session.scheduledTime}. You cannot join before the scheduled time.`,
-        scheduledDate: session.scheduledDate,
-        scheduledTime: session.scheduledTime,
-        status: 'SCHEDULED'
-      });
-    }
-
-    if (session.status === 'SCHEDULED') {
-      session.status = 'LIVE';
-      await session.save();
-    }
-
-    res.json(session);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// Host End Meeting for Everyone
-app.put('/api/meet/room/:roomId/end', auth(), async (req, res) => {
-  try {
-    const session = await LearningSession.findOne({ roomId: req.params.roomId });
-    if (!session) return res.status(404).json({ message: 'Room not found.' });
-
-    const hostStr = session.hostId ? session.hostId.toString() : session.studentA.toString();
-    if (hostStr !== req.user.id.toString()) {
-      return res.status(403).json({ message: 'Security Violation: Only the meeting Host can end the meeting for everyone.' });
-    }
-
-    session.status = 'COMPLETED';
-    session.endedAt = new Date();
-    await session.save();
-
-    meetSignalingStore.delete(req.params.roomId);
-
-    res.json({ message: 'Meeting permanently ended for everyone.', session });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// Leave Meeting (Temporary)
-app.post('/api/meet/room/:roomId/leave', auth(), async (req, res) => {
-  try {
-    if (!meetSignalingStore.has(req.params.roomId)) {
-      meetSignalingStore.set(req.params.roomId, []);
-    }
-    meetSignalingStore.get(req.params.roomId).push({
-      senderId: req.user.id.toString(),
-      type: 'participant-left',
-      payload: { userId: req.user.id },
-      timestamp: Date.now()
-    });
-
-    res.json({ message: 'Left meeting successfully. Meeting remains active.' });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// WebRTC Signaling: Push
-app.post('/api/meet/room/:roomId/signal', auth(), (req, res) => {
-  const { roomId } = req.params;
-  const { type, payload } = req.body;
-  const senderId = req.user.id.toString();
-
-  if (!meetSignalingStore.has(roomId)) {
-    meetSignalingStore.set(roomId, []);
-  }
-
-  const signals = meetSignalingStore.get(roomId);
-  signals.push({
-    senderId,
-    type,
-    payload,
-    timestamp: Date.now()
-  });
-
-  const fresh = signals.filter(s => Date.now() - s.timestamp < 30000);
-  meetSignalingStore.set(roomId, fresh);
-
-  res.json({ success: true });
-});
-
-// WebRTC Signaling: Pull
-app.get('/api/meet/room/:roomId/signal', auth(), (req, res) => {
-  const { roomId } = req.params;
-  const currentUserId = req.user.id.toString();
-
-  if (!meetSignalingStore.has(roomId)) {
-    return res.json({ signals: [] });
-  }
-
-  const signals = meetSignalingStore.get(roomId);
-  const myPeerSignals = signals.filter(s => s.senderId !== currentUserId);
-
-  res.json({ signals: myPeerSignals });
-});
-
-app.post('/api/meet/room/:roomId/message', auth(), async (req, res) => {
-  try {
-    const { message, sharedNotes } = req.body;
-    const session = await LearningSession.findOne({ roomId: req.params.roomId });
-    if (!session) return res.status(404).json({ message: 'Room not found' });
-
-    const sender = await User.findById(req.user.id);
-    if (message) {
-      const hasBadLanguage = BANNED_WORDS.some(word => message.toLowerCase().includes(word));
-      if (hasBadLanguage) {
-        return res.status(400).json({
-          warning: true,
-          message: '⚠️ Warning: Unprofessional language is strictly prohibited in SEEKER collaborative rooms.'
-        });
-      }
-
-      session.chatMessages.push({
-        senderName: sender.name,
-        message,
-        sentAt: new Date()
-      });
-    }
-
-    if (sharedNotes !== undefined) session.sharedNotes = sharedNotes;
-    await session.save();
-    res.json(session);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// Captions Sync
-app.post('/api/meet/room/:roomId/caption', auth(), async (req, res) => {
-  try {
-    const { originalText, translatedText, sourceLang } = req.body;
-    const session = await LearningSession.findOne({ roomId: req.params.roomId });
-    if (!session) return res.status(404).json({ message: 'Room not found' });
-
-    const sender = await User.findById(req.user.id);
-    session.activeCaption = {
-      speakerName: sender.name,
-      originalText: originalText || '',
-      translatedText: translatedText || originalText || '',
-      sourceLang: sourceLang || 'en-IN',
-      updatedAt: new Date()
-    };
-    session.markModified('activeCaption');
-    await session.save();
-
-    res.json({ message: 'Caption synced', activeCaption: session.activeCaption });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// ==========================================
-// 6. POST-SESSION RATINGS & REPUTATION ENGINE
-// ==========================================
-
-app.post('/api/meet/room/:roomId/review', auth(), async (req, res) => {
-  try {
-    const { rating, feedbackText, punctualityScore, skillEndorsed } = req.body;
-    const session = await LearningSession.findOne({ roomId: req.params.roomId });
-    if (!session) return res.status(404).json({ message: 'Session not found.' });
-
-    const reviewerId = req.user.id.toString();
-    const isStudentA = session.studentA.toString() === reviewerId;
-    const isStudentB = session.studentB.toString() === reviewerId;
-
-    if (!isStudentA && !isStudentB) {
-      return res.status(403).json({ message: 'Unauthorized: You were not a participant in this session.' });
-    }
-
-    const revieweeId = isStudentA ? session.studentB : session.studentA;
-
-    const existing = await PeerReview.findOne({ sessionId: session._id, reviewerId });
-    if (existing) {
-      return res.status(400).json({ message: 'You have already submitted a review for this session.' });
-    }
-
-    const review = new PeerReview({
-      sessionId: session._id,
-      reviewerId,
-      revieweeId,
-      skillEndorsed: skillEndorsed || session.topicToCover,
-      rating: Number(rating) || 5,
-      feedbackText: feedbackText || '',
-      punctualityScore: Number(punctualityScore) || 5
-    });
-    await review.save();
-
-    const allUserReviews = await PeerReview.find({ revieweeId });
-    const avgRating = (allUserReviews.reduce((sum, r) => sum + r.rating, 0) / allUserReviews.length).toFixed(1);
-
-    await User.findByIdAndUpdate(revieweeId, {
-      $set: { peerRating: Number(avgRating), totalReviews: allUserReviews.length },
-      $addToSet: { skillsTeach: skillEndorsed }
-    });
-
-    const reviewerUser = await User.findById(reviewerId);
-    const notification = new Notification({
-      userId: revieweeId,
-      senderId: reviewerId,
-      sessionId: session._id,
-      type: 'GENERAL',
-      title: 'New Peer Skill Endorsement!',
-      message: `${reviewerUser?.name} gave you a ${rating}★ rating and endorsed your skill in "${skillEndorsed}".`
-    });
-    await notification.save();
-
-    res.status(201).json({ message: 'Endorsement submitted successfully!', review });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-app.get('/api/meet/room/:roomId/review/status', auth(), async (req, res) => {
-  try {
-    const session = await LearningSession.findOne({ roomId: req.params.roomId });
-    if (!session) return res.status(404).json({ message: 'Session not found.' });
-
-    const review = await PeerReview.findOne({ sessionId: session._id, reviewerId: req.user.id });
-    res.json({ reviewed: Boolean(review), review });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// Fetch user's received peer reviews & endorsements
-app.get('/api/user/reviews', auth(), async (req, res) => {
-  try {
-    const reviews = await PeerReview.find({ revieweeId: req.user.id })
-      .populate('reviewerId', 'name college')
-      .populate('sessionId', 'topicToCover scheduledDate')
-      .sort({ createdAt: -1 });
-
-    res.json(reviews);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// ==========================================
-// 7. DASHBOARD AGGREGATED METRICS
-// ==========================================
-
-app.get('/api/student/dashboard', auth(), async (req, res) => {
-  try {
-    const studentId = req.user.id;
-    const [user, attempts, skillAssessments, pendingRequests, upcomingSessions] = await Promise.all([
-      User.findById(studentId).select('-password'),
-      QuizAttempt.find({ studentId }).populate('subjectId', 'name').sort({ attemptedAt: -1 }),
-      SkillAssessment.find({ userId: studentId }).sort({ completedAt: -1 }),
-      LearningRequest.find({ receiverId: studentId, status: 'PENDING' }).populate('senderId', 'name college'),
-      LearningSession.find({
-        $or: [{ studentA: studentId }, { studentB: studentId }],
-        status: 'SCHEDULED'
-      }).populate('studentA', 'name').populate('studentB', 'name')
-    ]);
-
-    const weakTopics = attempts
-      .filter(a => a.isWeak)
-      .map(a => ({
-        subject: a.subjectId?.name || 'Computer Science',
-        topic: a.topicTitle,
-        percentage: a.percentage
-      }));
-
-    const skillStats = {};
-    skillAssessments.forEach(att => {
-      if (!skillStats[att.skill]) skillStats[att.skill] = { attempts: 0, totalAccuracy: 0, bestAccuracy: 0 };
-      skillStats[att.skill].attempts += 1;
-      skillStats[att.skill].totalAccuracy += att.percentage;
-      if (att.percentage > skillStats[att.skill].bestAccuracy) {
-        skillStats[att.skill].bestAccuracy = att.percentage;
-      }
-    });
-
-    const skillSummary = Object.keys(skillStats).map(skill => {
-      const avg = Math.round(skillStats[skill].totalAccuracy / skillStats[skill].attempts);
-      const best = skillStats[skill].bestAccuracy;
-      return {
-        skill,
-        attempts: skillStats[skill].attempts,
-        accuracy: avg,
-        level: best >= 80 ? 'Advanced' : best >= 60 ? 'Intermediate' : 'Beginner'
-      };
-    });
-
-    res.json({
-      user,
-      totalQuizzesAttempted: attempts.length,
-      weakTopics,
-      skillSummary,
-      pendingRequestsCount: pendingRequests.length,
-      upcomingSessionsCount: upcomingSessions.length,
-      upcomingSessions
-    });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// ==========================================
-// 8. SEEKER STUDIO: CODE EXECUTION ENGINE
+// 5. SEEKER STUDIO: CODE EXECUTION ENGINE
 // ==========================================
 
 app.post('/api/studio/execute', auth(), async (req, res) => {
   try {
     const { language, code } = req.body;
-
     if (!code || !code.trim()) {
       return res.status(400).json({ output: 'Error: No code provided to execute.' });
     }
 
     let output = '';
-
     if (language === 'javascript') {
       const vm = require('vm');
       let logs = [];
