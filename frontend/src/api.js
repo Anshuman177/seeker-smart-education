@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const API = axios.create({
-  baseURL: 'https://seeker-smart-education.onrender.com',
+  baseURL: 'https://seeker-smart-education.onrender.com/api',
 });
 
 // Attach JWT token automatically if logged in
