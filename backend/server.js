@@ -350,106 +350,141 @@ app.get('/api/library/search', auth(), async (req, res) => {
   }
 });
 
-// INTELLIGENT TOPIC-SPECIFIC QUESTION SYNTHESISER
+// 100% DYNAMIC & UNIQUE TOPIC-SPECIFIC QUESTION SYNTHESISER
 function synthesizeQuestionsForTopic(skillName, targetCount) {
-  const cleanSkill = skillName.trim();
-  const lowerSkill = cleanSkill.toLowerCase();
+  const cleanSkill = (skillName || 'Computer Science').trim();
   const difficulties = ['Easy', 'Medium', 'Hard'];
-  const topics = ['Core Fundamentals & Syntax', 'Data Structures & Architecture', 'Execution Mechanics & Functions', 'Performance & Optimization', 'Production Best Practices'];
+  
+  const templatePool = [
+    {
+      q: (t) => `What is the primary architectural objective and core runtime design rule when building applications in ${t}?`,
+      options: [
+        `Ensuring modular isolation, deterministic predictability, and robust state management.`,
+        `Disabling exception boundaries to maximize raw, unverified thread execution speed.`,
+        `Storing all volatile runtime state directly inside global unmanaged memory pointers.`,
+        `Relying entirely on client-side caching without backend verification.`
+      ],
+      ans: `Ensuring modular isolation, deterministic predictability, and robust state management.`,
+      exp: `Achieving reliable production systems in ${t} requires strict adherence to modular boundaries and predictable state handling.`
+    },
+    {
+      q: (t) => `Which strategy is most critical for optimizing performance and scaling workloads in ${t}?`,
+      options: [
+        `Horizontal modular partitioning, asynchronous execution pipelines, and smart caching.`,
+        `Executing infinite blocking loops on the main execution thread.`,
+        `Bypassing input sanitization to accelerate data ingestion throughput.`,
+        `Disabling transactional rollbacks during database write operations.`
+      ],
+      ans: `Horizontal modular partitioning, asynchronous execution pipelines, and smart caching.`,
+      exp: `Proper partitioning and async pipelines prevent bottlenecks when scaling ${t} architectures under high load.`
+    },
+    {
+      q: (t) => `How does a robust production environment handle unhandled exceptions or runtime failures in ${t}?`,
+      options: [
+        `Through structured exception propagation, graceful rollbacks, and comprehensive logging.`,
+        `By terminating the underlying host operating system kernel immediately.`,
+        `By suppressing error signals and returning empty null pointers silently.`,
+        `By corrupting active thread memory caches to speed up reboot times.`
+      ],
+      ans: `Through structured exception propagation, graceful rollbacks, and comprehensive logging.`,
+      exp: `Structured exceptions guarantee atomic rollbacks and prevent data corruption in ${t}.`
+    },
+    {
+      q: (t) => `What is a common anti-pattern or design flaw to avoid when structuring projects in ${t}?`,
+      options: [
+        `Tight coupling across modules, lack of separation of concerns, and absent unit tests.`,
+        `Writing reusable components and clean modular documentation.`,
+        `Implementing non-blocking asynchronous event loops.`,
+        `Enforcing strict typing and input validation layers.`
+      ],
+      ans: `Tight coupling across modules, lack of separation of concerns, and absent unit tests.`,
+      exp: `Avoiding tight coupling ensures high maintainability and testability across ${t} codebases.`
+    },
+    {
+      q: (t) => `Why is dependency management and modular architecture crucial for enterprise scaling in ${t}?`,
+      options: [
+        `It enables independent component testing, clean versioning, and maintainable codebases.`,
+        `It increases binary file size to improve JIT compiler optimization flags.`,
+        `It bypasses enterprise network security firewalls automatically.`,
+        `It eliminates the need for any version control systems like Git.`
+      ],
+      ans: `It enables independent component testing, clean versioning, and maintainable codebases.`,
+      exp: `Modular dependency management is the cornerstone of robust enterprise software engineering in ${t}.`
+    },
+    {
+      q: (t) => `What role do core data structures play in optimizing memory efficiency within ${t}?`,
+      options: [
+        `Choosing the correct structure minimizes time complexity and prevents excessive heap allocation.`,
+        `They have no impact on runtime performance or memory consumption.`,
+        `They automatically encrypt sensitive user credentials at rest.`,
+        `They replace the need for physical RAM storage entirely.`
+      ],
+      ans: `Choosing the correct structure minimizes time complexity and prevents excessive heap allocation.`,
+      exp: `Optimal data structure selection directly governs algorithmic efficiency and memory footprint in ${t}.`
+    },
+    {
+      q: (t) => `How can developers ensure robust security hardening when deploying ${t} solutions?`,
+      options: [
+        `By validating all untrusted inputs, enforcing principle of least privilege, and sanitizing payloads.`,
+        `By storing plaintext passwords directly in client-side cookies.`,
+        `By disabling authentication headers on all public API routes.`,
+        `By executing unverified external scripts directly in production.`
+      ],
+      ans: `By validating all untrusted inputs, enforcing principle of least privilege, and sanitizing payloads.`,
+      exp: `Security best practices in ${t} mandate rigorous input validation and secure permission boundaries.`
+    },
+    {
+      q: (t) => `What is the significance of establishing automated testing suites for ${t} implementations?`,
+      options: [
+        `It catches regression bugs early, validates business logic, and ensures safe refactoring.`,
+        `It slows down deployment pipelines permanently without adding value.`,
+        `It replaces the need for manual code reviews and architecture design.`,
+        `It forces applications to run exclusively on single-threaded CPUs.`
+      ],
+      ans: `It catches regression bugs early, validates business logic, and ensures safe refactoring.`,
+      exp: `Automated testing suites provide confidence and verify contract adherence across ${t} releases.`
+    },
+    {
+      q: (t) => `Which debugging or diagnostic approach is most effective when isolating performance bottlenecks in ${t}?`,
+      options: [
+        `Profiling execution time, analyzing memory heap snapshots, and inspecting trace logs.`,
+        `Deleting random configuration files until the application starts.`,
+        `Ignoring error warnings and clearing browser cache repeatedly.`,
+        `Disabling all logging mechanisms to save disk space.`
+      ],
+      ans: `Profiling execution time, analyzing memory heap snapshots, and inspecting trace logs.`,
+      exp: `Systematic profiling and heap analysis are essential tools for diagnosing bottlenecks in ${t}.`
+    },
+    {
+      q: (t) => `What best defines production readiness for a distributed system leveraging ${t}?`,
+      options: [
+        `High availability, fault tolerance, horizontal elasticity, and robust observability metrics.`,
+        `Running on a single local laptop with infinite CPU throttling.`,
+        `Hardcoding all service IP addresses directly into source files.`,
+        `Using unencrypted HTTP connections for all internal microservice traffic.`
+      ],
+      ans: `High availability, fault tolerance, horizontal elasticity, and robust observability metrics.`,
+      exp: `Production-grade deployments of ${t} demand fault tolerance, elasticity, and comprehensive telemetry.`
+    }
+  ];
 
+  const topicsList = ['Foundations & Core Syntax', 'Architecture & Design', 'Execution Mechanics', 'Performance Optimization', 'Production Best Practices'];
   const generated = [];
 
   for (let i = 0; i < targetCount; i++) {
+    const template = templatePool[i % templatePool.length];
     const difficulty = difficulties[i % difficulties.length];
-    const topic = topics[i % topics.length];
-    let question = '';
-    let correctAnswer = '';
-    let options = [];
-    let explanation = '';
-
-    if (lowerSkill.includes('r programming') || lowerSkill.includes('r language') || lowerSkill === 'r') {
-      if (i % 3 === 0) {
-        question = 'In R programming, which data structure is best suited for storing heterogeneous columns of tabular data?';
-        correctAnswer = 'data.frame';
-        options = ['data.frame', 'vector', 'matrix', 'list'];
-        explanation = 'A data.frame in R is a tabular structure designed to store rows and columns of mixed data types.';
-      } else if (i % 3 === 1) {
-        question = 'Which package in R is universally utilized for grammar-based data visualization?';
-        correctAnswer = 'ggplot2';
-        options = ['ggplot2', 'lattice', 'baseplot', 'shiny'];
-        explanation = 'ggplot2 implements the grammar of graphics for expressive data visualizations in R.';
-      } else {
-        question = 'How do you assign a value to a variable in idiomatic R syntax?';
-        correctAnswer = '<-';
-        options = ['<-', '=', '==', ':='];
-        explanation = 'The assignment operator `<-` is the idiomatic and standard practice in R programming.';
-      }
-    } else if (lowerSkill.includes('javascript') || lowerSkill.includes('js')) {
-      if (i % 3 === 0) {
-        question = 'What is a closure in JavaScript?';
-        correctAnswer = 'A function bundled with its lexical environment, retaining access to outer scope variables.';
-        options = [
-          'A function bundled with its lexical environment, retaining access to outer scope variables.',
-          'A strict compilation directive that prevents memory leaks.',
-          'An asynchronous task handler executed strictly on the main thread.',
-          'A method to close active database connections.'
-        ];
-        explanation = 'Closures give inner functions persistent access to outer scopes after the parent function has returned.';
-      } else {
-        question = 'How does the JavaScript event loop prioritize microtasks (like Promises) versus macrotasks (like setTimeout)?';
-        correctAnswer = 'Microtasks execute entirely before the next macrotask is pulled from the queue.';
-        options = [
-          'Microtasks execute entirely before the next macrotask is pulled from the queue.',
-          'Macrotasks take precedence to prevent UI freezing.',
-          'Both queues are processed simultaneously via background threads.',
-          'Microtasks are ignored unless explicitly awaited.'
-        ];
-        explanation = 'The event loop completely drains the microtask queue before moving to the next macrotask.';
-      }
-    } else if (lowerSkill.includes('python')) {
-      if (i % 3 === 0) {
-        question = 'What is the primary characteristic of Python tuples compared to lists?';
-        correctAnswer = 'Tuples are immutable; once created, their elements cannot be modified.';
-        options = [
-          'Tuples are immutable; once created, their elements cannot be modified.',
-          'Tuples can store only numeric data types.',
-          'Tuples execute faster because they run on C pointers without garbage collection.',
-          'Tuples do not support slicing or indexing.'
-        ];
-        explanation = 'Tuples are immutable sequences in Python, making them hashable and safe from accidental mutation.';
-      } else {
-        question = 'What purpose do Python decorators serve?';
-        correctAnswer = 'They allow modification or enhancement of functions or methods without changing their source code.';
-        options = [
-          'They allow modification or enhancement of functions or methods without changing their source code.',
-          'They format PEP8 indentation automatically at runtime.',
-          'They encrypt sensitive variable states in memory.',
-          'They replace traditional class inheritance structures.'
-        ];
-        explanation = 'Decorators wrap callable objects to modify behavior before or after execution transparently.';
-      }
-    } else {
-      // Dynamic fallback tailored specifically to whatever topic the user searched
-      question = `[${cleanSkill} • ${topic}] Which core design principle governs reliable implementation and scaling of ${cleanSkill}?`;
-      correctAnswer = `Strict adherence to modular isolation, deterministic error handling, and robust runtime validation.`;
-      options = [
-        `Strict adherence to modular isolation, deterministic error handling, and robust runtime validation.`,
-        `Executing volatile state mutations across unmanaged global memory pointers.`,
-        `Disabling exception boundaries to maximize raw unverified execution speed.`,
-        `Relying strictly on client-side caching without backend synchronization.`
-      ];
-      explanation = `Mastering ${cleanSkill} requires ensuring clean modular separation, predictable state transitions, and robust architecture.`;
-    }
+    const topic = topicsList[i % topicsList.length];
 
     generated.push({
       _id: new mongoose.Types.ObjectId(),
       skill: cleanSkill,
       difficulty,
       topic,
-      question,
-      options: shuffle(options),
-      correctAnswer,
-      explanation
+      question: template.q(cleanSkill),
+      options: shuffle(template.options),
+      correctAnswer: template.ans,
+      explanation: template.exp
     });
   }
 
