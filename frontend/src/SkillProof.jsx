@@ -59,11 +59,10 @@ export default function SkillProof() {
   const loadAllLibraryResources = async () => {
     setSearchingLibrary(true);
     try {
-      // Empty query fetches all books/notes from MongoDB
       const res = await API.get('/library/search?query=');
       setAllLibraryItems(res.data || []);
       setFilteredResults(res.data || []);
-      if (res.data && res.data.length > 0) {
+      if (res.data && res.data.length > 0 && !selectedResource) {
         setSelectedResource(res.data[0]);
       }
     } catch (err) {
@@ -75,16 +74,24 @@ export default function SkillProof() {
 
   const handleSearch = async (e) => {
     if (e) e.preventDefault();
-    if (!searchQuery.trim()) {
+    const queryStr = searchQuery.trim();
+    if (!queryStr) {
       setFilteredResults(allLibraryItems);
+      if (allLibraryItems.length > 0) setSelectedResource(allLibraryItems[0]);
       return;
     }
+    
+    // Clear selectedResource so custom typed query takes precedence if no exact match
+    setSelectedResource(null);
     setSearchingLibrary(true);
+
     try {
-      const res = await API.get(`/library/search?query=${encodeURIComponent(searchQuery.trim())}`);
+      const res = await API.get(`/library/search?query=${encodeURIComponent(queryStr)}`);
       setFilteredResults(res.data || []);
       if (res.data && res.data.length > 0) {
         setSelectedResource(res.data[0]);
+      } else {
+        setSelectedResource(null);
       }
     } catch (err) {
       console.error('Search failed:', err);
@@ -115,7 +122,6 @@ export default function SkillProof() {
         count: questionCount
       });
       setAssessment(res.data);
-      // Reload library in background so any new on-the-fly generated book appears in the library!
       loadAllLibraryResources();
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to generate assessment.');
@@ -224,7 +230,6 @@ export default function SkillProof() {
     }
   };
 
-  // Hidden in-page iframe print (Zero blank tab popup issues)
   const triggerInPagePrint = (htmlMarkup) => {
     const iframe = printFrameRef.current;
     if (!iframe) return;
@@ -367,6 +372,17 @@ export default function SkillProof() {
             body { font-family: 'Georgia', serif; color: #1e1b4b; margin: 0; padding: 12px; background: #fff; }
             .cert-border { border: 6px double #312e81; padding: 36px 44px; text-align: center; border-radius: 8px; background: radial-gradient(circle at center, #ffffff 0%, #fafafa 100%); }
             .header-tag { font-family: 'Segoe UI', sans-serif; font-size: 9pt; font-weight: 800; letter-spacing: 0.2em; color: #4338ca; text-transform: uppercase; margin-bottom: 12px; }
+            h1 { font-size: 24pt; margin: 10px 0; }
+            .cert-body { font-size: 11pt; font-style: italic; color: #475569; margin: 10px 0; }
+            .student-name { font-size: 22pt; font-weight: bold; color: #312e81; margin: 10px 0; border-bottom: 2px solid #c7d2fe; display: inline-block; padding-bottom: 4px; }
+            .details { font-size: 11pt; max-width: 650px; margin: 15px auto; line-height: 1.6; color: #334155; }
+            .metrics-pill { display: inline-block; background: #e0e7ff; color: #3730a3; padding: 6px 16px; border-radius: 999px; font-family: 'Segoe UI', sans-serif; font-size: 9.5pt; font-weight: bold; margin: 15px 0; }
+            .footer-grid { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 30px; font-family: 'Segoe UI', sans-serif; font-size: 9pt; color: #64748b; border-top: 1px solid #cbd5e1; padding-top: 15px; }
+          </style>
+        </head>
+        <body>
+          <div class="cert-border">
+            <div class="header-tag">SEEKER Smart Education • Academic Competency Evidence</div>
             <h1>Certificate of Demonstrated Competency</h1>
             <div class="cert-body">This credential is authenticated and awarded to</div>
             <div class="student-name">${user?.name || 'Student Candidate'}</div>
@@ -397,6 +413,9 @@ export default function SkillProof() {
       setGeneratingPdf(false);
     }
   };
+
+  const activeTargetTitle = selectedResource ? selectedResource.title : (searchQuery.trim() || 'Select or Search a Topic');
+  const activeTargetSubtitle = selectedResource ? `Skill: ${selectedResource.skill} • Author: ${selectedResource.author}` : (searchQuery.trim() ? `Dynamic Topic: "${searchQuery.trim()}" — Academic notes & 10 Qs test will be synthesized instantly.` : 'An academic reference note will be synthesized dynamically for this topic.');
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-slate-950 text-slate-100 p-6 md:p-10 max-w-6xl mx-auto space-y-8">
@@ -451,7 +470,7 @@ export default function SkillProof() {
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search library or type any new topic (e.g. JavaScript, Docker, Machine Learning, Cloud)..."
+                  placeholder="Search library or type any new topic (e.g. C#, R Programming, Docker, Machine Learning)..."
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs font-semibold text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -493,10 +512,10 @@ export default function SkillProof() {
               </span>
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <BookOpen className="w-4 h-4 text-emerald-400" />
-                {selectedResource ? selectedResource.title : (searchQuery.trim() || 'Select or Search a Topic')}
+                {activeTargetTitle}
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                {selectedResource ? `Skill: ${selectedResource.skill} • Author: ${selectedResource.author}` : 'An academic reference note will be synthesized dynamically for this topic.'}
+                {activeTargetSubtitle}
               </p>
             </div>
 
@@ -523,7 +542,7 @@ export default function SkillProof() {
             {filteredResults.length === 0 ? (
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-10 text-center space-y-3">
                 <BookOpen className="w-10 h-10 mx-auto text-slate-600" />
-                <h4 className="text-sm font-bold text-white">No Exact Seeded Book for "{searchQuery}"</h4>
+                <h4 className="text-sm font-bold text-white">No Exact Seeded Book for "{searchQuery || 'this topic'}"</h4>
                 <p className="text-xs text-slate-400 max-w-md mx-auto">
                   Don't worry! Click the button below, and our engine will synthesize a structured reference note and generate your test immediately.
                 </p>
@@ -531,7 +550,7 @@ export default function SkillProof() {
                   onClick={() => handleGenerateAssessment()}
                   className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2.5 rounded-xl text-xs transition inline-flex items-center gap-2 shadow-lg"
                 >
-                  <Sparkles className="w-4 h-4" /> Synthesize Notes & Start Test for "{searchQuery}"
+                  <Sparkles className="w-4 h-4" /> Synthesize Notes & Start Test for "{searchQuery || 'Custom Topic'}"
                 </button>
               </div>
             ) : (
