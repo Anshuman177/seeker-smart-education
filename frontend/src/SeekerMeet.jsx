@@ -27,8 +27,8 @@ import {
 } from 'lucide-react';
 
 const SUPPORTED_LANGUAGES = [
-  { code: 'hi-IN', label: 'Hindi (हिंदी)', ttsCode: 'hi-IN' },
   { code: 'en-US', label: 'English (US)', ttsCode: 'en-US' },
+  { code: 'hi-IN', label: 'Hindi (हिंदी)', ttsCode: 'hi-IN' },
   { code: 'es-ES', label: 'Spanish (Español)', ttsCode: 'es-ES' },
   { code: 'fr-FR', label: 'French (Français)', ttsCode: 'fr-FR' },
   { code: 'de-DE', label: 'German (Deutsch)', ttsCode: 'de-DE' }
@@ -62,10 +62,14 @@ export default function SeekerMeet() {
   const [message, setMessage] = useState('');
   const [notes, setNotes] = useState('');
 
-  // Subtitles & AI Dubbing
+  // Audio Connection State
+  const [audioStatus, setAudioStatus] = useState('Connecting...'); 
+
+  // Multilingual Settings
   const [captionsEnabled, setCaptionsEnabled] = useState(true);
-  const [selectedLanguage, setSelectedLanguage] = useState('en-US');
-  const [audioDubbingEnabled, setAudioDubbingEnabled] = useState(true);
+  const [sourceLanguage, setSourceLanguage] = useState('en-US'); 
+  const [targetLanguage, setTargetLanguage] = useState('en-US'); 
+  const [audioDubbingEnabled, setAudioDubbingEnabled] = useState(false);
   const [activeSubtitle, setActiveSubtitle] = useState(null);
 
   // Review & Rating Modal States
@@ -86,6 +90,8 @@ export default function SeekerMeet() {
   const processedSignalIdsRef = useRef(new Set());
   const subtitleTimeoutRef = useRef(null);
   const isSpeechRunningRef = useRef(false);
+  const iceCandidateQueueRef = useRef([]);
+  const pendingCaptionQueueRef = useRef([]);
 
   const isHost = Boolean(
     session && (
@@ -114,6 +120,23 @@ export default function SeekerMeet() {
       recognitionRef.current = null;
     }
     if (window.speechSynthesis) window.speechSynthesis.cancel();
+
+    dataChannelRef.current = null;
+    remoteStreamRef.current = null;
+    iceCandidateQueueRef.current = [];
+    pendingCaptionQueueRef.current = [];
+    processedSignalIdsRef.current.clear();
+
+    if (subtitleTimeoutRef.current) {
+      clearTimeout(subtitleTimeoutRef.current);
+      subtitleTimeoutRef.current = null;
+    }
+
+    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+
+    setActiveSubtitle(null);
+    setAudioStatus('Connecting...');
   }, []);
 
   const sendSignal = async (type, payload) => {
@@ -122,18 +145,21 @@ export default function SeekerMeet() {
     } catch (e) {}
   };
 
-  const performTranslation = async (text, targetLangCode) => {
-    if (!text || targetLangCode.startsWith('en')) return text;
+  const performTranslation = async (text, sourceLangCode, targetLangCode) => {
+    if (!text) return text;
+    const srcShort = sourceLangCode ? sourceLangCode.split('-')[0] : 'auto';
+    const tgtShort = targetLangCode ? targetLangCode.split('-')[0] : 'en';
+    if (srcShort === tgtShort) return text;
+
     try {
-      const short = targetLangCode.split('-')[0];
-      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${short}&dt=t&q=${encodeURIComponent(text)}`;
+      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${srcShort}&tl=${tgtShort}&dt=t&q=${encodeURIComponent(text)}`;
       const res = await fetch(url);
       const data = await res.json();
       if (data && data[0]) {
         return data[0].map(item => item[0]).join('');
       }
     } catch (e) {
-      console.warn('Translation fallback:', e);
+      console.warn('Translation fallback error:', e);
     }
     return text;
   };
@@ -146,7 +172,7 @@ export default function SeekerMeet() {
 
       const utterance = new SpeechSynthesisUtterance(text);
       const langConfig = SUPPORTED_LANGUAGES.find(l => l.code === langCode);
-      utterance.lang = langConfig ? langConfig.ttsCode : 'hi-IN';
+      utterance.lang = langConfig ? langConfig.ttsCode : 'en-US';
       utterance.rate = 1.0;
       utterance.volume = 1.0;
 
@@ -160,35 +186,55 @@ export default function SeekerMeet() {
     } catch (err) {}
   };
 
-  // HANDLES INCOMING REMOTE SPEECH (TRANSLATES & SPEAKS FOR THE LISTENER)
   const handleIncomingRemoteSpeech = useCallback(async (payload) => {
-    const translated = await performTranslation(payload.rawText, selectedLanguage);
+    if (!captionsEnabled && !audioDubbingEnabled) return;
 
-    setActiveSubtitle({
-      speakerName: payload.speakerName,
-      text: translated
-    });
+    const translatedText = await performTranslation(payload.rawText, payload.sourceLang || 'en-US', targetLanguage);
 
-    if (subtitleTimeoutRef.current) clearTimeout(subtitleTimeoutRef.current);
-    subtitleTimeoutRef.current = setTimeout(() => {
-      setActiveSubtitle(null);
-    }, 6000);
+    if (captionsEnabled) {
+      setActiveSubtitle({
+        speakerName: payload.speakerName,
+        text: translatedText
+      });
+
+      if (subtitleTimeoutRef.current) clearTimeout(subtitleTimeoutRef.current);
+      subtitleTimeoutRef.current = setTimeout(() => {
+        setActiveSubtitle(null);
+      }, 6000);
+    }
 
     if (audioDubbingEnabled) {
-      executeDubbedTTS(translated, selectedLanguage);
+      executeDubbedTTS(translatedText, targetLanguage);
     }
-  }, [selectedLanguage, audioDubbingEnabled]);
+  }, [captionsEnabled, audioDubbingEnabled, targetLanguage]);
 
-  const setupDataChannelEvents = useCallback((channel) => {
+  const setupDataChannel = useCallback((channel) => {
     dataChannelRef.current = channel;
-    channel.onmessage = async (event) => {
+
+    channel.onopen = () => {
+      while (
+        channel.readyState === 'open' &&
+        pendingCaptionQueueRef.current.length > 0
+      ) {
+        channel.send(JSON.stringify(pendingCaptionQueueRef.current.shift()));
+      }
+    };
+
+    channel.onclose = () => {
+      if (dataChannelRef.current === channel) {
+        dataChannelRef.current = null;
+      }
+    };
+
+    channel.onerror = () => {};
+    channel.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data);
         if (payload.type === 'caption') {
           handleIncomingRemoteSpeech(payload);
         }
       } catch (err) {
-        console.warn('DataChannel packet error:', err);
+        console.warn('DataChannel message parse error:', err);
       }
     };
   }, [handleIncomingRemoteSpeech]);
@@ -204,9 +250,18 @@ export default function SeekerMeet() {
       await pc.setLocalDescription(offer);
       sendSignal('offer', offer);
     } catch (err) {
-      console.warn('Offer creation issue:', err);
+      console.warn('Offer creation error:', err);
     }
   }, [roomId]);
+
+  const flushIceQueue = async (pc) => {
+    while (iceCandidateQueueRef.current.length > 0) {
+      const candidate = iceCandidateQueueRef.current.shift();
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {}
+    }
+  };
 
   const setupWebRTCConnection = useCallback(() => {
     if (peerConnectionRef.current) return;
@@ -226,11 +281,12 @@ export default function SeekerMeet() {
 
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = stream;
-        remoteAudioRef.current.play().catch(e => console.warn('Audio auto-play note:', e));
+        remoteAudioRef.current.play().catch(e => console.warn('Audio playback restriction:', e));
       }
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = stream;
       }
+      setAudioStatus('Audio Connected');
     };
 
     pc.onicecandidate = (event) => {
@@ -239,11 +295,27 @@ export default function SeekerMeet() {
       }
     };
 
-    const dc = pc.createDataChannel('seeker-captions', { reliable: true });
-    setupDataChannelEvents(dc);
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'connected') {
+        setAudioStatus('Audio Connected');
+      } else if (
+        pc.connectionState === 'failed' ||
+        pc.connectionState === 'disconnected' ||
+        pc.connectionState === 'closed'
+      ) {
+        setAudioStatus('Remote audio unavailable');
+      } else {
+        setAudioStatus('Connecting...');
+      }
+    };
+
+    if (isHost) {
+      const dc = pc.createDataChannel('seeker-captions', { reliable: true });
+      setupDataChannel(dc);
+    }
 
     pc.ondatachannel = (event) => {
-      setupDataChannelEvents(event.channel);
+      setupDataChannel(event.channel);
     };
 
     if (isHost) {
@@ -251,7 +323,7 @@ export default function SeekerMeet() {
         createAndSendOffer();
       }, 1000);
     }
-  }, [isHost, setupDataChannelEvents, createAndSendOffer]);
+  }, [isHost, setupDataChannel, createAndSendOffer]);
 
   const pollSignalingChannel = useCallback(async () => {
     const pc = peerConnectionRef.current;
@@ -268,20 +340,27 @@ export default function SeekerMeet() {
 
         if (sig.type === 'offer') {
           await pc.setRemoteDescription(new RTCSessionDescription(sig.payload));
+          await flushIceQueue(pc);
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           sendSignal('answer', answer);
         } else if (sig.type === 'answer') {
           if (pc.signalingState === 'have-local-offer') {
             await pc.setRemoteDescription(new RTCSessionDescription(sig.payload));
+            await flushIceQueue(pc);
           }
         } else if (sig.type === 'ice-candidate') {
-          try {
-            await pc.addIceCandidate(new RTCIceCandidate(sig.payload));
-          } catch (e) {}
+          if (!pc.remoteDescription || !pc.remoteDescription.type) {
+            iceCandidateQueueRef.current.push(sig.payload);
+          } else {
+            try {
+              await pc.addIceCandidate(new RTCIceCandidate(sig.payload));
+            } catch (e) {}
+          }
         } else if (sig.type === 'participant-left') {
           if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
           if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+          setAudioStatus('Remote audio unavailable');
         }
       }
     } catch (e) {}
@@ -309,7 +388,6 @@ export default function SeekerMeet() {
     }
   }, [roomId, notes, clearSession, terminateLocalMedia]);
 
-  // LOCAL SPEECH RECOGNITION (TRANSMITS TO REMOTE PEER VIA DATACHANNEL)
   const startSpeechRecognition = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) return;
@@ -320,8 +398,8 @@ export default function SeekerMeet() {
 
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = selectedLanguage;
+      recognition.interimResults = false; // Prevents duplicate interim chunks
+      recognition.lang = sourceLanguage; 
 
       recognition.onstart = () => {
         isSpeechRunningRef.current = true;
@@ -330,28 +408,28 @@ export default function SeekerMeet() {
       recognition.onresult = (event) => {
         let transcript = '';
         for (let i = event.resultIndex; i < event.results.length; i++) {
-          transcript += event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            transcript += event.results[i][0].transcript;
+          }
         }
 
         const clean = transcript.trim();
         if (clean.length > 0) {
           const payload = {
             type: 'caption',
-            speakerName: user?.name || 'Peer',
+            speakerName: user?.name || 'User',
             rawText: clean,
-            sourceLang: selectedLanguage
+            sourceLang: sourceLanguage
           };
 
-          // Send local speech transcript to remote peer via WebRTC DataChannel
-          if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
+          if (
+            dataChannelRef.current &&
+            dataChannelRef.current.readyState === 'open'
+          ) {
             dataChannelRef.current.send(JSON.stringify(payload));
+          } else {
+            pendingCaptionQueueRef.current.push(payload);
           }
-
-          API.post(`/meet/room/${roomId}/caption`, {
-            originalText: clean,
-            translatedText: clean,
-            sourceLang: selectedLanguage
-          }).catch(() => {});
         }
       };
 
@@ -361,7 +439,7 @@ export default function SeekerMeet() {
 
       recognition.onend = () => {
         isSpeechRunningRef.current = false;
-        if (captionsEnabled && micActive) {
+        if ((captionsEnabled || audioDubbingEnabled) && micActive) {
           setTimeout(() => {
             try { recognition.start(); } catch (e) {}
           }, 250);
@@ -383,7 +461,6 @@ export default function SeekerMeet() {
     }
   };
 
-  // SILENT & NON-BLOCKING INITIALIZATION
   const initMeeting = useCallback(async () => {
     try {
       const res = await API.get(`/meet/room/${roomId}`);
@@ -401,7 +478,6 @@ export default function SeekerMeet() {
         setMicActive(true);
         if (setGlobalMic) setGlobalMic(true);
       } catch (mediaErr) {
-        console.warn('Browser media permission restricted. Running in collaboration mode.');
         setMicActive(false);
         setVideoActive(false);
         if (setGlobalMic) setGlobalMic(false);
@@ -431,12 +507,12 @@ export default function SeekerMeet() {
   }, [initMeeting, pollSignalingChannel, pollRoomData, terminateLocalMedia]);
 
   useEffect(() => {
-    if (captionsEnabled && micActive) {
+    if ((captionsEnabled || audioDubbingEnabled) && micActive) {
       startSpeechRecognition();
     } else {
       stopSpeechRecognition();
     }
-  }, [captionsEnabled, micActive, selectedLanguage]);
+  }, [captionsEnabled, audioDubbingEnabled, micActive, sourceLanguage]);
 
   const toggleMic = () => {
     if (localStreamRef.current) {
@@ -490,6 +566,17 @@ export default function SeekerMeet() {
 
         screenTrack.onended = () => {
           setIsScreenSharing(false);
+
+          if (peerConnectionRef.current && localStreamRef.current) {
+            const camTrack = localStreamRef.current.getVideoTracks()[0];
+            const sender = peerConnectionRef.current
+              .getSenders()
+              .find(s => s.track && s.track.kind === 'video');
+
+            if (sender && camTrack) {
+              sender.replaceTrack(camTrack).catch(() => {});
+            }
+          }
         };
       } catch (err) {}
     }
@@ -531,18 +618,18 @@ export default function SeekerMeet() {
     );
     if (!confirmEnd) return;
 
-    terminateLocalMedia();
-    if (clearSession) clearSession();
-    if (setActiveSession) setActiveSession(null);
-    if (setIsMinimized) setIsMinimized(false);
-
     try {
       await API.put(`/meet/room/${roomId}/end`);
+
+      terminateLocalMedia();
+      if (clearSession) clearSession();
+      if (setActiveSession) setActiveSession(null);
+      if (setIsMinimized) setIsMinimized(false);
+
+      setMeetingEnded(true);
     } catch (err) {
       alert(err.response?.data?.message || 'Could not end meeting.');
     }
-
-    setMeetingEnded(true);
   };
 
   const handleSubmitReview = async () => {
@@ -554,11 +641,10 @@ export default function SeekerMeet() {
         feedbackText,
         skillEndorsed: session?.topicToCover?.split(' ')[0] || 'Peer Collaboration'
       });
-      alert('Endorsement submitted! Peer reputation updated in MongoDB.');
+      alert('Endorsement submitted! User reputation updated in MongoDB.');
       navigate('/studyswap');
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to submit review.');
-      navigate('/studyswap');
     } finally {
       setSubmittingReview(false);
     }
@@ -572,10 +658,10 @@ export default function SeekerMeet() {
     );
   }
 
-  const isStudentA = user?.id === session?.studentA?._id || user?._id === session?.studentA?._id;
-  const peer = isStudentA ? session?.studentB : session?.studentA;
+  const isUserA = user?.id === session?.studentA?._id || user?._id === session?.studentA?._id;
+  const peer = isUserA ? session?.studentB : session?.studentA;
+  const peerName = peer?.name || 'Connected User';
 
-  // POST-MEETING ENDORSEMENT & RATING SCREEN
   if (meetingEnded) {
     return (
       <div className="min-h-[calc(100vh-4rem)] bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center">
@@ -587,7 +673,7 @@ export default function SeekerMeet() {
           <div>
             <h1 className="text-xl font-black mb-1">Session Concluded</h1>
             <p className="text-xs text-slate-400">
-              Rate your learning session with <strong className="text-white">{peer?.name || 'Peer'}</strong> to update their verified skill reputation.
+              Rate your learning session with <strong className="text-white">{peerName}</strong> to update their verified skill reputation.
             </p>
           </div>
 
@@ -646,19 +732,24 @@ export default function SeekerMeet() {
 
   return (
     <div className="h-[calc(100vh-4rem)] bg-slate-950 text-white flex flex-col">
-      {/* Hidden Two-Way Audio Sink */}
       <audio ref={remoteAudioRef} autoPlay playsInline />
 
       {/* Header */}
       <div className="bg-slate-900 border-b border-slate-800 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-3 h-3 rounded-full bg-emerald-500 animate-ping" />
+          <div
+            className={`w-3 h-3 rounded-full ${
+              audioStatus === 'Audio Connected'
+                ? 'bg-emerald-500 animate-pulse'
+                : 'bg-amber-500'
+            }`}
+          />
           <div>
             <h2 className="text-sm font-bold flex items-center gap-2">
               SEEKER Meet: {session?.topicToCover}
             </h2>
             <p className="text-xs text-slate-400">
-              Partner: <strong className="text-indigo-400">{peer?.name || 'Peer'}</strong> ({peer?.college || 'Institution'}) • 
+              Partner: <strong className="text-indigo-400">{peerName}</strong> ({peer?.college || 'Institution'}) • 
               Role: <span className="text-amber-400 uppercase font-semibold">{isHost ? 'Host' : 'Participant'}</span> • 
               Status: <span className="text-emerald-400 uppercase font-bold">{session?.status}</span>
             </p>
@@ -699,7 +790,7 @@ export default function SeekerMeet() {
         </div>
       </div>
 
-      {/* Main Grid Stage */}
+      {/* Main Stage Grid */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden">
         
         {/* Left Stage */}
@@ -747,9 +838,9 @@ export default function SeekerMeet() {
               {!videoActive && (
                 <div className="flex flex-col items-center">
                   <div className="w-20 h-20 rounded-full bg-indigo-600/30 border border-indigo-500 flex items-center justify-center text-xl font-bold text-indigo-400 mb-2">
-                    {user?.name?.charAt(0)}
+                    {user?.name?.charAt(0) || 'U'}
                   </div>
-                  <span className="text-sm font-semibold text-white">{user?.name} (You)</span>
+                  <span className="text-sm font-semibold text-white">{user?.name || 'You'} (You)</span>
                   <span className="text-xs text-emerald-400 mt-1 flex items-center gap-1">
                     <CheckCircle2 className="w-3.5 h-3.5" /> Present in Room
                   </span>
@@ -772,26 +863,46 @@ export default function SeekerMeet() {
                 ref={remoteVideoRef}
                 autoPlay
                 playsInline
-                className="absolute inset-0 w-full h-full object-cover rounded-2xl"
+                className={`absolute inset-0 w-full h-full object-cover rounded-2xl ${
+                  remoteStreamRef.current ? 'block' : 'hidden'
+                }`}
               />
 
-              <div className="flex flex-col items-center">
-                <div className="w-20 h-20 rounded-full bg-sky-600/30 border border-sky-500 flex items-center justify-center text-xl font-bold text-sky-400 mb-2">
-                  {peer?.name?.charAt(0) || 'P'}
+              {!remoteStreamRef.current && (
+                <div className="flex flex-col items-center">
+                  <div className="w-20 h-20 rounded-full bg-sky-600/30 border border-sky-500 flex items-center justify-center text-xl font-bold text-sky-400 mb-2">
+                    {peerName.charAt(0)}
+                  </div>
+                  <span className="text-sm font-semibold text-white">{peerName}</span>
+                  <span className="text-xs text-sky-400 mt-1 flex items-center gap-1">
+                    <ShieldCheck className="w-3.5 h-3.5" /> {audioStatus}
+                  </span>
                 </div>
-                <span className="text-sm font-semibold text-white">{peer?.name || 'Connected Peer'}</span>
+              )}
+
+              {remoteStreamRef.current && (
+                <div className="absolute bottom-3 left-3 z-10 bg-slate-950/80 px-2 py-1 rounded-lg text-xs font-semibold">
+                  {peerName}
+                </div>
+              )}
+
+              <div className="hidden">
+                <div className="w-20 h-20 rounded-full bg-sky-600/30 border border-sky-500 flex items-center justify-center text-xl font-bold text-sky-400 mb-2">
+                  {peerName.charAt(0)}
+                </div>
+                <span className="text-sm font-semibold text-white">{peerName}</span>
                 <span className="text-xs text-sky-400 mt-1 flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5" /> Two-Way Audio Active
+                  <ShieldCheck className="w-3.5 h-3.5" /> {audioStatus}
                 </span>
               </div>
             </div>
           </div>
 
-          {/* Subtitle Banner (Receives Remote Peer's Spoken Text via DataChannel) */}
+          {/* Subtitle Banner */}
           {captionsEnabled && activeSubtitle && activeSubtitle.text && (
             <div className="bg-slate-900/95 border-2 border-indigo-500 rounded-xl p-3.5 shadow-2xl flex items-start gap-3 animate-in fade-in transition-all">
               <span className="px-2.5 py-1 rounded-lg bg-indigo-600 text-[10px] font-black uppercase tracking-wider shrink-0 mt-0.5">
-                LIVE CC ({selectedLanguage.split('-')[0].toUpperCase()})
+                LIVE CC ({targetLanguage.split('-')[0].toUpperCase()})
               </span>
               <div className="text-xs text-slate-100 leading-relaxed font-medium">
                 <strong className="text-indigo-400 mr-2">{activeSubtitle.speakerName}:</strong>
@@ -813,7 +924,7 @@ export default function SeekerMeet() {
             <textarea
               value={notes}
               onChange={(e) => handleNotesChange(e.target.value)}
-              placeholder="Write explanation notes, code snippets, or solutions here. Syncs live across peers..."
+              placeholder="Write explanation notes, code snippets, or solutions here. Syncs live across users..."
               className="flex-1 min-h-[130px] bg-slate-950 border border-slate-800 rounded-xl p-4 font-mono text-xs text-emerald-400 focus:outline-none focus:border-indigo-500"
             />
           </div>
@@ -860,19 +971,38 @@ export default function SeekerMeet() {
               {captionsEnabled ? 'CC ON' : 'CC OFF'}
             </button>
 
+            {/* Separate Speaker Source Language & Listener Target Language Dropdowns */}
             <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
               <Globe className="w-3.5 h-3.5 text-indigo-400" />
-              <select
-                value={selectedLanguage}
-                onChange={(e) => setSelectedLanguage(e.target.value)}
-                className="bg-transparent text-xs text-white focus:outline-none cursor-pointer"
-              >
-                {SUPPORTED_LANGUAGES.map((lang) => (
-                  <option key={lang.code} value={lang.code} className="bg-slate-900 text-white">
-                    {lang.label}
-                  </option>
-                ))}
-              </select>
+              <div className="flex flex-col">
+                <span className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">My Spoken Lang</span>
+                <select
+                  value={sourceLanguage}
+                  onChange={(e) => setSourceLanguage(e.target.value)}
+                  className="bg-transparent text-xs text-white focus:outline-none cursor-pointer font-semibold"
+                >
+                  {SUPPORTED_LANGUAGES.map((lang) => (
+                    <option key={`src-${lang.code}`} value={lang.code} className="bg-slate-900 text-white">
+                      {lang.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="border-l border-slate-800 pl-2 flex flex-col">
+                <span className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Target CC Lang</span>
+                <select
+                  value={targetLanguage}
+                  onChange={(e) => setTargetLanguage(e.target.value)}
+                  className="bg-transparent text-xs text-white focus:outline-none cursor-pointer font-semibold"
+                >
+                  {SUPPORTED_LANGUAGES.map((lang) => (
+                    <option key={`tgt-${lang.code}`} value={lang.code} className="bg-slate-900 text-white">
+                      {lang.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
               <button
                 type="button"
@@ -881,7 +1011,7 @@ export default function SeekerMeet() {
                   setAudioDubbingEnabled(!audioDubbingEnabled);
                 }}
                 title="Toggle AI Dubbed Voice Playback"
-                className={`p-1.5 rounded-lg text-xs transition flex items-center gap-1 ${
+                className={`p-1.5 rounded-lg text-xs transition flex items-center gap-1 ml-1 ${
                   audioDubbingEnabled ? 'bg-emerald-600 text-white shadow' : 'bg-slate-800 text-slate-400 hover:text-white'
                 }`}
               >
@@ -900,7 +1030,7 @@ export default function SeekerMeet() {
 
           <div className="flex-1 p-4 overflow-y-auto space-y-3">
             {session?.chatMessages?.length === 0 ? (
-              <p className="text-xs text-slate-500 text-center mt-10">No messages yet. Say hi to your peer!</p>
+              <p className="text-xs text-slate-500 text-center mt-10">No messages yet. Say hi to your partner!</p>
             ) : (
               session?.chatMessages?.map((msg, i) => (
                 <div
