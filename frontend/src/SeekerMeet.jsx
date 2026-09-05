@@ -160,6 +160,7 @@ export default function SeekerMeet() {
     } catch (err) {}
   };
 
+  // HANDLES INCOMING REMOTE SPEECH (TRANSLATES & SPEAKS FOR THE LISTENER)
   const handleIncomingRemoteSpeech = useCallback(async (payload) => {
     const translated = await performTranslation(payload.rawText, selectedLanguage);
 
@@ -308,6 +309,7 @@ export default function SeekerMeet() {
     }
   }, [roomId, notes, clearSession, terminateLocalMedia]);
 
+  // LOCAL SPEECH RECOGNITION (TRANSMITS TO REMOTE PEER VIA DATACHANNEL)
   const startSpeechRecognition = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) return;
@@ -333,16 +335,6 @@ export default function SeekerMeet() {
 
         const clean = transcript.trim();
         if (clean.length > 0) {
-          setActiveSubtitle({
-            speakerName: user?.name || 'You',
-            text: clean
-          });
-
-          if (subtitleTimeoutRef.current) clearTimeout(subtitleTimeoutRef.current);
-          subtitleTimeoutRef.current = setTimeout(() => {
-            setActiveSubtitle(null);
-          }, 6000);
-
           const payload = {
             type: 'caption',
             speakerName: user?.name || 'Peer',
@@ -350,6 +342,7 @@ export default function SeekerMeet() {
             sourceLang: selectedLanguage
           };
 
+          // Send local speech transcript to remote peer via WebRTC DataChannel
           if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
             dataChannelRef.current.send(JSON.stringify(payload));
           }
@@ -398,7 +391,6 @@ export default function SeekerMeet() {
       if (setActiveSession) setActiveSession(res.data);
       if (res.data.sharedNotes) setNotes(res.data.sharedNotes);
 
-      // Attempt media access silently without blocking UI
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
         localStreamRef.current = stream;
@@ -666,7 +658,7 @@ export default function SeekerMeet() {
               SEEKER Meet: {session?.topicToCover}
             </h2>
             <p className="text-xs text-slate-400">
-              Partner: <strong className="text-indigo-400">{peer?.name}</strong> ({peer?.college}) • 
+              Partner: <strong className="text-indigo-400">{peer?.name || 'Peer'}</strong> ({peer?.college || 'Institution'}) • 
               Role: <span className="text-amber-400 uppercase font-semibold">{isHost ? 'Host' : 'Participant'}</span> • 
               Status: <span className="text-emerald-400 uppercase font-bold">{session?.status}</span>
             </p>
@@ -787,7 +779,7 @@ export default function SeekerMeet() {
                 <div className="w-20 h-20 rounded-full bg-sky-600/30 border border-sky-500 flex items-center justify-center text-xl font-bold text-sky-400 mb-2">
                   {peer?.name?.charAt(0) || 'P'}
                 </div>
-                <span className="text-sm font-semibold text-white">{peer?.name} (Peer)</span>
+                <span className="text-sm font-semibold text-white">{peer?.name || 'Connected Peer'}</span>
                 <span className="text-xs text-sky-400 mt-1 flex items-center gap-1">
                   <ShieldCheck className="w-3.5 h-3.5" /> Two-Way Audio Active
                 </span>
@@ -795,7 +787,7 @@ export default function SeekerMeet() {
             </div>
           </div>
 
-          {/* Subtitle Banner */}
+          {/* Subtitle Banner (Receives Remote Peer's Spoken Text via DataChannel) */}
           {captionsEnabled && activeSubtitle && activeSubtitle.text && (
             <div className="bg-slate-900/95 border-2 border-indigo-500 rounded-xl p-3.5 shadow-2xl flex items-start gap-3 animate-in fade-in transition-all">
               <span className="px-2.5 py-1 rounded-lg bg-indigo-600 text-[10px] font-black uppercase tracking-wider shrink-0 mt-0.5">

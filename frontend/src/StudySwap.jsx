@@ -36,7 +36,8 @@ export default function StudySwap() {
   const [activeTab, setActiveTab] = useState('matched'); // 'matched' | 'requests' | 'sessions' | 'notifications'
   const [peers, setPeers] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [incomingRequests, setIncomingRequests] = useState([]);
   const [outgoingRequests, setOutgoingRequests] = useState([]);
   const [sessions, setSessions] = useState([]);
@@ -65,7 +66,6 @@ export default function StudySwap() {
   const [openDropdownId, setOpenDropdownId] = useState(null);
 
   useEffect(() => {
-    loadPeers();
     loadRequests();
     loadSessions();
     loadNotifications();
@@ -75,14 +75,20 @@ export default function StudySwap() {
     return () => clearInterval(timer);
   }, []);
 
-  const loadPeers = async (query = '') => {
+  // Updated: Discover users only when a search query is submitted
+  const searchPeers = async (query = '') => {
+    if (!query.trim()) {
+      setPeers([]);
+      setHasSearched(false);
+      return;
+    }
     setLoading(true);
+    setHasSearched(true);
     try {
-      const endpoint = query ? `/studyswap/discover?query=${encodeURIComponent(query)}` : '/studyswap/matches';
-      const res = await API.get(endpoint);
+      const res = await API.get(`/studyswap/discover?query=${encodeURIComponent(query.trim())}`);
       setPeers(res.data || []);
     } catch (err) {
-      console.error('Failed to load peers:', err);
+      console.error('Failed to discover users:', err);
     } finally {
       setLoading(false);
     }
@@ -125,7 +131,13 @@ export default function StudySwap() {
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
-    loadPeers(searchQuery);
+    searchPeers(searchQuery);
+  };
+
+  const handleResetSearch = () => {
+    setSearchQuery('');
+    setPeers([]);
+    setHasSearched(false);
   };
 
   const openProposalModal = (match) => {
@@ -157,7 +169,6 @@ export default function StudySwap() {
     }
   };
 
-  // Fixed: Correctly passes scheduleDate and scheduleTime from component state
   const handleAcceptAndSchedule = async () => {
     if (!acceptingReq) return;
     setSchedulingLoading(true);
@@ -262,7 +273,7 @@ export default function StudySwap() {
             activeTab === 'matched' ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-900 text-slate-400 hover:text-white'
           }`}
         >
-          <Users className="w-4 h-4" /> Discover Users ({peers.length})
+          <Users className="w-4 h-4" /> Discover Users
         </button>
 
         <button
@@ -293,7 +304,7 @@ export default function StudySwap() {
         </button>
       </div>
 
-      {/* TAB 1: PEERS DISCOVERY */}
+      {/* TAB 1: PEERS DISCOVERY (Empty by default unless searched) */}
       {activeTab === 'matched' && (
         <div className="space-y-6">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row gap-3 items-center justify-between shadow-xl">
@@ -304,7 +315,7 @@ export default function StudySwap() {
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search users by name or skill..."
+                  placeholder="Search registered users by name or skill..."
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -312,25 +323,32 @@ export default function StudySwap() {
                 type="submit"
                 className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition shadow-lg shrink-0"
               >
-                Search
+                Search Users
               </button>
             </form>
 
             <button
-              onClick={() => { setSearchQuery(''); loadPeers(); }}
+              type="button"
+              onClick={handleResetSearch}
               className="bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shrink-0"
             >
               <Shuffle className="w-4 h-4 text-indigo-400" /> Reset
             </button>
           </div>
 
-          {loading ? (
-            <div className="text-center py-16 text-slate-500 text-xs">Finding available study partners...</div>
+          {!hasSearched ? (
+            <div className="text-center py-16 bg-slate-900 border border-slate-800 rounded-2xl p-8 space-y-3">
+              <Users className="w-10 h-10 mx-auto text-slate-600" />
+              <h3 className="text-sm font-bold text-white">Search for Registered Users</h3>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">Enter a user name or skill in the search bar above to discover and connect with registered peers on SEEKER.</p>
+            </div>
+          ) : loading ? (
+            <div className="text-center py-16 text-slate-500 text-xs">Searching registered users...</div>
           ) : peers.length === 0 ? (
             <div className="text-center py-16 bg-slate-900 border border-slate-800 rounded-2xl p-8 space-y-2">
               <Users className="w-8 h-8 mx-auto text-slate-600 mb-1" />
               <h3 className="text-sm font-bold text-white">No Users Found</h3>
-              <p className="text-xs text-slate-400">Try searching for other subjects or reset filters.</p>
+              <p className="text-xs text-slate-400">No registered users matched your query "{searchQuery}". Try another keyword.</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
