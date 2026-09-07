@@ -56,19 +56,22 @@ export default function SeekerMeet() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [meetingEnded, setMeetingEnded] = useState(false);
-  const [micActive, setMicActive] = useState(false);
-  const [videoActive, setVideoActive] = useState(false);
+  const [micActive, setMicActive] = useState(true);
+  const [videoActive, setVideoActive] = useState(true);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [message, setMessage] = useState('');
   const [notes, setNotes] = useState('');
 
-  // Audio Connection State
-  const [audioStatus, setAudioStatus] = useState('Connecting...'); 
+  // Audio Connection & Stream States
+  const [audioStatus, setAudioStatus] = useState('Connecting...');
+  const [localStream, setLocalStream] = useState(null);
+  const [remoteStream, setRemoteStream] = useState(null);
+  const [remoteAudioAvailable, setRemoteAudioAvailable] = useState(false);
 
   // Multilingual Settings
   const [captionsEnabled, setCaptionsEnabled] = useState(true);
-  const [sourceLanguage, setSourceLanguage] = useState('en-US'); 
-  const [targetLanguage, setTargetLanguage] = useState('en-US'); 
+  const [sourceLanguage, setSourceLanguage] = useState('en-US');
+  const [targetLanguage, setTargetLanguage] = useState('en-US');
   const [audioDubbingEnabled, setAudioDubbingEnabled] = useState(false);
   const [activeSubtitle, setActiveSubtitle] = useState(null);
 
@@ -93,14 +96,7 @@ export default function SeekerMeet() {
   const iceCandidateQueueRef = useRef([]);
   const pendingCaptionQueueRef = useRef([]);
 
-  const isHost = Boolean(
-    session && (
-      session.hostId?._id === user?.id ||
-      session.hostId?._id === user?._id ||
-      session.hostId === user?.id ||
-      session.hostId === user?._id
-    )
-  );
+  const currentUserId = user?.id || user?._id;
 
   const terminateLocalMedia = useCallback(() => {
     if (localStreamRef.current) {
@@ -123,6 +119,9 @@ export default function SeekerMeet() {
 
     dataChannelRef.current = null;
     remoteStreamRef.current = null;
+    setLocalStream(null);
+    setRemoteStream(null);
+    setRemoteAudioAvailable(false);
     iceCandidateQueueRef.current = [];
     pendingCaptionQueueRef.current = [];
     processedSignalIdsRef.current.clear();
@@ -134,15 +133,68 @@ export default function SeekerMeet() {
 
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+    if (localVideoRef.current) localVideoRef.current.srcObject = null;
 
     setActiveSubtitle(null);
     setAudioStatus('Connecting...');
   }, []);
 
+  // Bind local video stream via useEffect when state changes
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream;
+      localVideoRef.current.play().catch(() => {});
+    }
+  }, [localStream]);
+
+  // Bind remote video stream via useEffect when state changes
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream;
+      remoteVideoRef.current.play().catch(() => {});
+    }
+  }, [remoteStream]);
+
+  // Bind remote audio stream via useEffect when state changes
+  useEffect(() => {
+    if (remoteAudioRef.current && remoteStream) {
+      remoteAudioRef.current.srcObject = remoteStream;
+      remoteAudioRef.current.play().catch(err => {
+        console.warn('[SEEKER RTC] Remote audio autoplay blocked:', err);
+      });
+    }
+  }, [remoteStream]);
+
+  // Dynamic Audio Status Calculation
+  useEffect(() => {
+    const pc = peerConnectionRef.current;
+    if (!pc) {
+      setAudioStatus('Connecting...');
+      return;
+    }
+
+    const updateStatus = () => {
+      const state = pc.connectionState;
+      if (state === 'failed' || state === 'disconnected' || state === 'closed') {
+        setAudioStatus('Remote audio unavailable');
+      } else if (state === 'connected' && remoteAudioAvailable) {
+        setAudioStatus('Audio Connected');
+      } else {
+        setAudioStatus('Connecting...');
+      }
+    };
+
+    updateStatus();
+    pc.onconnectionstatechange = updateStatus;
+    pc.oniceconnectionstatechange = updateStatus;
+  }, [remoteAudioAvailable]);
+
   const sendSignal = async (type, payload) => {
     try {
       await API.post(`/meet/room/${roomId}/signal`, { type, payload });
-    } catch (e) {}
+    } catch (e) {
+      console.error('[SEEKER RTC] Error sending signal:', type, e);
+    }
   };
 
   const performTranslation = async (text, sourceLangCode, targetLangCode) => {
@@ -212,10 +264,7 @@ export default function SeekerMeet() {
     dataChannelRef.current = channel;
 
     channel.onopen = () => {
-      while (
-        channel.readyState === 'open' &&
-        pendingCaptionQueueRef.current.length > 0
-      ) {
+      while (channel.readyState === 'open' && pendingCaptionQueueRef.current.length > 0) {
         channel.send(JSON.stringify(pendingCaptionQueueRef.current.shift()));
       }
     };
@@ -226,7 +275,10 @@ export default function SeekerMeet() {
       }
     };
 
-    channel.onerror = () => {};
+    channel.onerror = (err) => {
+      console.error('[SEEKER RTC] DataChannel error:', err);
+    };
+
     channel.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data);
@@ -250,7 +302,7 @@ export default function SeekerMeet() {
       await pc.setLocalDescription(offer);
       sendSignal('offer', offer);
     } catch (err) {
-      console.warn('Offer creation error:', err);
+      console.error('[SEEKER RTC] Offer creation error:', err);
     }
   }, [roomId]);
 
@@ -259,11 +311,13 @@ export default function SeekerMeet() {
       const candidate = iceCandidateQueueRef.current.shift();
       try {
         await pc.addIceCandidate(new RTCIceCandidate(candidate));
-      } catch (e) {}
+      } catch (e) {
+        console.error('[SEEKER RTC] Error flushing queued ICE candidate:', e);
+      }
     }
   };
 
-  const setupWebRTCConnection = useCallback(() => {
+  const setupWebRTCConnection = useCallback((fetchedIsHost) => {
     if (peerConnectionRef.current) return;
 
     const pc = new RTCPeerConnection(RTC_CONFIG);
@@ -276,17 +330,25 @@ export default function SeekerMeet() {
     }
 
     pc.ontrack = (event) => {
-      const [stream] = event.streams;
-      remoteStreamRef.current = stream;
+      console.log('[SEEKER RTC] Remote audio track received');
+      if (event.track.kind === 'audio') {
+        setRemoteAudioAvailable(true);
+      }
 
-      if (remoteAudioRef.current) {
-        remoteAudioRef.current.srcObject = stream;
-        remoteAudioRef.current.play().catch(e => console.warn('Audio playback restriction:', e));
+      let stream = event.streams?.[0];
+      if (!stream) {
+        if (!remoteStreamRef.current) {
+          remoteStreamRef.current = new MediaStream();
+        }
+        stream = remoteStreamRef.current;
+        if (!stream.getTracks().includes(event.track)) {
+          stream.addTrack(event.track);
+        }
+      } else {
+        remoteStreamRef.current = stream;
       }
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = stream;
-      }
-      setAudioStatus('Audio Connected');
+
+      setRemoteStream(stream);
     };
 
     pc.onicecandidate = (event) => {
@@ -296,20 +358,19 @@ export default function SeekerMeet() {
     };
 
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'connected') {
-        setAudioStatus('Audio Connected');
-      } else if (
-        pc.connectionState === 'failed' ||
-        pc.connectionState === 'disconnected' ||
-        pc.connectionState === 'closed'
-      ) {
+      console.log('[SEEKER RTC] Connection state:', pc.connectionState);
+      const state = pc.connectionState;
+      if (state === 'failed' || state === 'disconnected' || state === 'closed') {
         setAudioStatus('Remote audio unavailable');
+      } else if (state === 'connected' && remoteAudioAvailable) {
+        setAudioStatus('Audio Connected');
       } else {
         setAudioStatus('Connecting...');
       }
     };
 
-    if (isHost) {
+    if (fetchedIsHost) {
+      console.log('[SEEKER RTC] Creating host offer');
       const dc = pc.createDataChannel('seeker-captions', { reliable: true });
       setupDataChannel(dc);
     }
@@ -318,12 +379,13 @@ export default function SeekerMeet() {
       setupDataChannel(event.channel);
     };
 
-    if (isHost) {
+    if (fetchedIsHost) {
+      console.log('[SEEKER RTC] Sending offer');
       setTimeout(() => {
         createAndSendOffer();
       }, 1000);
     }
-  }, [isHost, setupDataChannel, createAndSendOffer]);
+  }, [setupDataChannel, createAndSendOffer, remoteAudioAvailable]);
 
   const pollSignalingChannel = useCallback(async () => {
     const pc = peerConnectionRef.current;
@@ -332,36 +394,53 @@ export default function SeekerMeet() {
     try {
       const res = await API.get(`/meet/room/${roomId}/signal`);
       const signals = res.data.signals || [];
+      if (signals.length === 0) return;
+
+      const successfullyAckedIds = [];
 
       for (const sig of signals) {
-        const sigKey = `${sig.type}-${sig.timestamp}`;
-        if (processedSignalIdsRef.current.has(sigKey)) continue;
-        processedSignalIdsRef.current.add(sigKey);
+        const sigKey = sig._id || `${sig.type}-${sig.timestamp}`;
+        if (processedSignalIdsRef.current.has(sigKey)) {
+          if (sig._id) successfullyAckedIds.push(sig._id);
+          continue;
+        }
 
-        if (sig.type === 'offer') {
-          await pc.setRemoteDescription(new RTCSessionDescription(sig.payload));
-          await flushIceQueue(pc);
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          sendSignal('answer', answer);
-        } else if (sig.type === 'answer') {
-          if (pc.signalingState === 'have-local-offer') {
+        try {
+          if (sig.type === 'offer') {
+            console.log('[SEEKER RTC] Received offer');
             await pc.setRemoteDescription(new RTCSessionDescription(sig.payload));
             await flushIceQueue(pc);
-          }
-        } else if (sig.type === 'ice-candidate') {
-          if (!pc.remoteDescription || !pc.remoteDescription.type) {
-            iceCandidateQueueRef.current.push(sig.payload);
-          } else {
-            try {
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            console.log('[SEEKER RTC] Sending answer');
+            sendSignal('answer', answer);
+          } else if (sig.type === 'answer') {
+            if (pc.signalingState === 'have-local-offer') {
+              await pc.setRemoteDescription(new RTCSessionDescription(sig.payload));
+              await flushIceQueue(pc);
+            }
+          } else if (sig.type === 'ice-candidate') {
+            if (!pc.remoteDescription || !pc.remoteDescription.type) {
+              iceCandidateQueueRef.current.push(sig.payload);
+            } else {
               await pc.addIceCandidate(new RTCIceCandidate(sig.payload));
-            } catch (e) {}
+            }
+          } else if (sig.type === 'participant-left') {
+            setRemoteAudioAvailable(false);
+            setRemoteStream(null);
+            remoteStreamRef.current = null;
+            setAudioStatus('Remote audio unavailable');
           }
-        } else if (sig.type === 'participant-left') {
-          if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
-          if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
-          setAudioStatus('Remote audio unavailable');
+
+          processedSignalIdsRef.current.add(sigKey);
+          if (sig._id) successfullyAckedIds.push(sig._id);
+        } catch (signalErr) {
+          console.warn('[SEEKER RTC] Error processing signal (will retry):', sig.type, signalErr);
         }
+      }
+
+      if (successfullyAckedIds.length > 0) {
+        await API.post(`/meet/room/${roomId}/signal/ack`, { signalIds: successfullyAckedIds });
       }
     } catch (e) {}
   }, [roomId]);
@@ -398,8 +477,8 @@ export default function SeekerMeet() {
 
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
-      recognition.interimResults = false; // Prevents duplicate interim chunks
-      recognition.lang = sourceLanguage; 
+      recognition.interimResults = false;
+      recognition.lang = sourceLanguage;
 
       recognition.onstart = () => {
         isSpeechRunningRef.current = true;
@@ -422,10 +501,7 @@ export default function SeekerMeet() {
             sourceLang: sourceLanguage
           };
 
-          if (
-            dataChannelRef.current &&
-            dataChannelRef.current.readyState === 'open'
-          ) {
+          if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
             dataChannelRef.current.send(JSON.stringify(payload));
           } else {
             pendingCaptionQueueRef.current.push(payload);
@@ -468,23 +544,32 @@ export default function SeekerMeet() {
       if (setActiveSession) setActiveSession(res.data);
       if (res.data.sharedNotes) setNotes(res.data.sharedNotes);
 
+      const fetchedHostId = res.data.hostId?._id || res.data.hostId;
+      const fetchedIsHost = String(fetchedHostId) === String(currentUserId);
+
+      console.log('[SEEKER RTC] Current user:', currentUserId);
+      console.log('[SEEKER RTC] Host:', fetchedIsHost);
+
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
         localStreamRef.current = stream;
-        stream.getVideoTracks().forEach(t => { t.enabled = false; });
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream;
-        }
+        stream.getVideoTracks().forEach(t => { t.enabled = true; });
+        stream.getAudioTracks().forEach(t => { t.enabled = true; });
+
+        setLocalStream(stream);
         setMicActive(true);
+        setVideoActive(true);
         if (setGlobalMic) setGlobalMic(true);
+        if (setGlobalCam) setGlobalCam(true);
       } catch (mediaErr) {
+        console.warn('Media acquisition issue:', mediaErr);
         setMicActive(false);
         setVideoActive(false);
         if (setGlobalMic) setGlobalMic(false);
         if (setGlobalCam) setGlobalCam(false);
       }
 
-      setupWebRTCConnection();
+      setupWebRTCConnection(fetchedIsHost);
     } catch (err) {
       if (err.response?.status === 410 || err.response?.data?.session?.status === 'COMPLETED') {
         setMeetingEnded(true);
@@ -492,7 +577,7 @@ export default function SeekerMeet() {
     } finally {
       setLoading(false);
     }
-  }, [roomId, setActiveSession, setupWebRTCConnection, setGlobalMic, setGlobalCam]);
+  }, [roomId, setActiveSession, setupWebRTCConnection, setGlobalMic, setGlobalCam, currentUserId]);
 
   useEffect(() => {
     initMeeting();
@@ -566,13 +651,9 @@ export default function SeekerMeet() {
 
         screenTrack.onended = () => {
           setIsScreenSharing(false);
-
           if (peerConnectionRef.current && localStreamRef.current) {
             const camTrack = localStreamRef.current.getVideoTracks()[0];
-            const sender = peerConnectionRef.current
-              .getSenders()
-              .find(s => s.track && s.track.kind === 'video');
-
+            const sender = peerConnectionRef.current.getSenders().find(s => s.track && s.track.kind === 'video');
             if (sender && camTrack) {
               sender.replaceTrack(camTrack).catch(() => {});
             }
@@ -620,12 +701,10 @@ export default function SeekerMeet() {
 
     try {
       await API.put(`/meet/room/${roomId}/end`);
-
       terminateLocalMedia();
       if (clearSession) clearSession();
       if (setActiveSession) setActiveSession(null);
       if (setIsMinimized) setIsMinimized(false);
-
       setMeetingEnded(true);
     } catch (err) {
       alert(err.response?.data?.message || 'Could not end meeting.');
@@ -658,9 +737,13 @@ export default function SeekerMeet() {
     );
   }
 
-  const isUserA = user?.id === session?.studentA?._id || user?._id === session?.studentA?._id;
-  const peer = isUserA ? session?.studentB : session?.studentA;
-  const peerName = peer?.name || 'Connected User';
+  const studentAObj = session?.studentA;
+  const studentBObj = session?.studentB;
+  const isStudentA = String(studentAObj?._id || studentAObj) === String(currentUserId);
+  const peer = isStudentA ? studentBObj : studentAObj;
+  const hostObj = session?.hostId;
+  const hostName = hostObj?.name || (hostObj === currentUserId ? user?.name : null);
+  const peerName = peer?.name || (isHost ? (session?.studentA?.name || session?.studentB?.name) : hostName) || 'Connected User';
 
   if (meetingEnded) {
     return (
@@ -832,10 +915,10 @@ export default function SeekerMeet() {
                 autoPlay
                 playsInline
                 muted
-                className={`absolute inset-0 w-full h-full object-cover rounded-2xl scale-x-[-1] ${videoActive ? 'block' : 'hidden'}`}
+                className={`absolute inset-0 w-full h-full object-cover rounded-2xl scale-x-[-1] ${videoActive && localStream ? 'block' : 'hidden'}`}
               />
 
-              {!videoActive && (
+              {(!videoActive || !localStream) && (
                 <div className="flex flex-col items-center">
                   <div className="w-20 h-20 rounded-full bg-indigo-600/30 border border-indigo-500 flex items-center justify-center text-xl font-bold text-indigo-400 mb-2">
                     {user?.name?.charAt(0) || 'U'}
@@ -864,11 +947,11 @@ export default function SeekerMeet() {
                 autoPlay
                 playsInline
                 className={`absolute inset-0 w-full h-full object-cover rounded-2xl ${
-                  remoteStreamRef.current ? 'block' : 'hidden'
+                  remoteStream ? 'block' : 'hidden'
                 }`}
               />
 
-              {!remoteStreamRef.current && (
+              {!remoteStream && (
                 <div className="flex flex-col items-center">
                   <div className="w-20 h-20 rounded-full bg-sky-600/30 border border-sky-500 flex items-center justify-center text-xl font-bold text-sky-400 mb-2">
                     {peerName.charAt(0)}
@@ -879,22 +962,6 @@ export default function SeekerMeet() {
                   </span>
                 </div>
               )}
-
-              {remoteStreamRef.current && (
-                <div className="absolute bottom-3 left-3 z-10 bg-slate-950/80 px-2 py-1 rounded-lg text-xs font-semibold">
-                  {peerName}
-                </div>
-              )}
-
-              <div className="hidden">
-                <div className="w-20 h-20 rounded-full bg-sky-600/30 border border-sky-500 flex items-center justify-center text-xl font-bold text-sky-400 mb-2">
-                  {peerName.charAt(0)}
-                </div>
-                <span className="text-sm font-semibold text-white">{peerName}</span>
-                <span className="text-xs text-sky-400 mt-1 flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5" /> {audioStatus}
-                </span>
-              </div>
             </div>
           </div>
 
