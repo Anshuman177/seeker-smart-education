@@ -19,8 +19,6 @@ import {
   Subtitles,
   Globe,
   Minimize2,
-  Volume2,
-  VolumeX,
   Radio,
   LogOut,
   Star,
@@ -28,11 +26,11 @@ import {
 } from 'lucide-react';
 
 const SUPPORTED_LANGUAGES = [
-  { code: 'en-US', label: 'English (US)', ttsCode: 'en-US' },
-  { code: 'hi-IN', label: 'Hindi (हिंदी)', ttsCode: 'hi-IN' },
-  { code: 'es-ES', label: 'Spanish (Español)', ttsCode: 'es-ES' },
-  { code: 'fr-FR', label: 'French (Français)', ttsCode: 'fr-FR' },
-  { code: 'de-DE', label: 'German (Deutsch)', ttsCode: 'de-DE' }
+  { code: 'en-US', label: 'English (US)' },
+  { code: 'hi-IN', label: 'Hindi (हिंदी)' },
+  { code: 'es-ES', label: 'Spanish (Español)' },
+  { code: 'fr-FR', label: 'French (Français)' },
+  { code: 'de-DE', label: 'German (Deutsch)' }
 ];
 
 const RTC_CONFIG = {
@@ -75,7 +73,6 @@ export default function SeekerMeet() {
   const [captionsEnabled, setCaptionsEnabled] = useState(true);
   const [sourceLanguage, setSourceLanguage] = useState('en-US');
   const [targetLanguage, setTargetLanguage] = useState('en-US');
-  const [audioDubbingEnabled, setAudioDubbingEnabled] = useState(false);
   const [activeSubtitle, setActiveSubtitle] = useState(null);
 
   // Review & Rating Modal States
@@ -105,8 +102,6 @@ export default function SeekerMeet() {
   targetLanguageRef.current = targetLanguage;
   const captionsEnabledRef = useRef(captionsEnabled);
   captionsEnabledRef.current = captionsEnabled;
-  const audioDubbingEnabledRef = useRef(audioDubbingEnabled);
-  audioDubbingEnabledRef.current = audioDubbingEnabled;
   const sourceLanguageRef = useRef(sourceLanguage);
   sourceLanguageRef.current = sourceLanguage;
   const remoteAudioAvailableRef = useRef(false);
@@ -130,7 +125,6 @@ export default function SeekerMeet() {
       try { recognitionRef.current.stop(); } catch (e) {}
       recognitionRef.current = null;
     }
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
 
     dataChannelRef.current = null;
     remoteStreamRef.current = null;
@@ -171,25 +165,17 @@ export default function SeekerMeet() {
     }
   }, [remoteStream]);
 
-  // Bind remote audio stream & handle muting when dubbing is active
+  // Bind remote audio stream (always unmuted for original voice playback)
   useEffect(() => {
     if (remoteAudioRef.current && remoteStream) {
       remoteAudioRef.current.srcObject = remoteStream;
-      if (audioDubbingEnabled) {
-        remoteAudioRef.current.muted = true;
-        console.log('[SEEKER AUDIO] Remote audio muted for dubbing');
-      } else {
-        remoteAudioRef.current.muted = false;
-        console.log('[SEEKER AUDIO] Remote audio playback enabled');
-      }
+      remoteAudioRef.current.muted = false;
+      console.log('[SEEKER AUDIO] Remote audio playback enabled');
       remoteAudioRef.current.play().catch(err => {
         console.warn('[SEEKER RTC] Remote audio autoplay blocked:', err);
       });
     }
-    if (!audioDubbingEnabled && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-    }
-  }, [remoteStream, audioDubbingEnabled]);
+  }, [remoteStream]);
 
   const sendSignal = async (type, payload) => {
     try {
@@ -218,30 +204,8 @@ export default function SeekerMeet() {
     return text;
   };
 
-  const executeDubbedTTS = (text, langCode) => {
-    if (!window.speechSynthesis || !audioDubbingEnabledRef.current || !text) return;
-    try {
-      if (window.speechSynthesis.paused) window.speechSynthesis.resume();
-      window.speechSynthesis.cancel();
-
-      const utterance = new SpeechSynthesisUtterance(text);
-      const langConfig = SUPPORTED_LANGUAGES.find(l => l.code === langCode);
-      utterance.lang = langConfig ? langConfig.ttsCode : 'en-US';
-      utterance.rate = 1.0;
-      utterance.volume = 1.0;
-
-      const voices = window.speechSynthesis.getVoices();
-      if (voices.length > 0) {
-        const matched = voices.find(v => v.lang.toLowerCase().includes(langCode.substring(0, 2).toLowerCase()));
-        if (matched) utterance.voice = matched;
-      }
-
-      window.speechSynthesis.speak(utterance);
-    } catch (err) {}
-  };
-
   const handleIncomingRemoteSpeech = useCallback(async (payload) => {
-    if (!captionsEnabledRef.current && !audioDubbingEnabledRef.current) return;
+    if (!captionsEnabledRef.current) return;
 
     // Duplicate caption guard using rawText + sourceLang within a time window
     const captionKey = `${payload.sourceLang}-${payload.rawText}`;
@@ -267,10 +231,6 @@ export default function SeekerMeet() {
       subtitleTimeoutRef.current = setTimeout(() => {
         setActiveSubtitle(null);
       }, 6000);
-    }
-
-    if (audioDubbingEnabledRef.current) {
-      executeDubbedTTS(translatedText, targetLanguageRef.current);
     }
   }, []);
 
@@ -541,7 +501,6 @@ export default function SeekerMeet() {
 
       recognition.onend = () => {
         isSpeechRunningRef.current = false;
-        // Do not aggressively restart in a tight loop to prevent mobile microphone chime sounds ("tu-dung")
       };
 
       recognition.start();
@@ -618,12 +577,12 @@ export default function SeekerMeet() {
   }, [roomId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if ((captionsEnabled || audioDubbingEnabled) && micActive) {
+    if (captionsEnabled && micActive) {
       startSpeechRecognition();
     } else {
       stopSpeechRecognition();
     }
-  }, [captionsEnabled, audioDubbingEnabled, micActive, sourceLanguage]);
+  }, [captionsEnabled, micActive, sourceLanguage]);
 
   const toggleMic = () => {
     if (localStreamRef.current) {
@@ -1105,21 +1064,6 @@ export default function SeekerMeet() {
                   ))}
                 </select>
               </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (window.speechSynthesis) window.speechSynthesis.resume();
-                  setAudioDubbingEnabled(!audioDubbingEnabled);
-                }}
-                title="Toggle AI Dubbed Voice Playback"
-                className={`p-1.5 rounded-lg text-xs transition flex items-center gap-1 ml-1 ${
-                  audioDubbingEnabled ? 'bg-emerald-600 text-white shadow' : 'bg-slate-800 text-slate-400 hover:text-white'
-                }`}
-              >
-                {audioDubbingEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
-                <span className="text-[10px] font-bold">Dubbing</span>
-              </button>
             </div>
           </div>
         </div>
