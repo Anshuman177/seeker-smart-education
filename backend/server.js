@@ -5,7 +5,6 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
-// Mongoose Models
 const User = require('./models/User');
 const { Subject, Quiz, QuizAttempt } = require('./models/Education');
 const { SkillQuestion, SkillAttempt, SkillAssessment } = require('./models/SkillProof');
@@ -919,6 +918,19 @@ app.get('/api/meet/room/:roomId', auth(), async (req, res) => {
     if (meeting.status === 'COMPLETED') {
       return res.status(410).json({ message: 'Meeting has already concluded.' });
     }
+    if (meeting.status === 'CANCELLED') {
+      return res.status(410).json({ message: 'Meeting has been cancelled.' });
+    }
+
+    const currentUserIdStr = req.user.id.toString();
+    const studentAStr = meeting.studentA ? (meeting.studentA._id ? meeting.studentA._id.toString() : meeting.studentA.toString()) : '';
+    const studentBStr = meeting.studentB ? (meeting.studentB._id ? meeting.studentB._id.toString() : meeting.studentB.toString()) : '';
+    const hostIdStr = meeting.hostId ? (meeting.hostId._id ? meeting.hostId._id.toString() : meeting.hostId.toString()) : '';
+
+    if (currentUserIdStr !== studentAStr && currentUserIdStr !== studentBStr && currentUserIdStr !== hostIdStr) {
+      return res.status(403).json({ message: 'Forbidden: You are not authorized to join this meeting room.' });
+    }
+
     res.json(meeting);
   } catch (err) {
     console.error('Error fetching room:', err);
@@ -929,10 +941,18 @@ app.get('/api/meet/room/:roomId', auth(), async (req, res) => {
 app.post('/api/meet/room/:roomId/signal', auth(), async (req, res) => {
   try {
     const { type, payload } = req.body;
+    
+    const validSignalTypes = ['offer', 'answer', 'ice-candidate', 'participant-left'];
+    if (!validSignalTypes.includes(type)) {
+      return res.status(400).json({ message: 'Invalid signal type.' });
+    }
+
     const meeting = await LearningSession.findOne({ roomId: req.params.roomId });
     if (!meeting) return res.status(404).json({ message: 'Room not found' });
+    if (meeting.status === 'COMPLETED' || meeting.status === 'CANCELLED') {
+      return res.status(410).json({ message: 'Meeting is no longer active.' });
+    }
 
-    // Verify user is a member of this meeting session
     const currentUserIdStr = req.user.id.toString();
     const studentAStr = meeting.studentA ? meeting.studentA.toString() : '';
     const studentBStr = meeting.studentB ? meeting.studentB.toString() : '';
@@ -942,23 +962,10 @@ app.post('/api/meet/room/:roomId/signal', auth(), async (req, res) => {
       return res.status(403).json({ message: 'Forbidden: You are not a participant of this meeting room.' });
     }
 
-    // Determine the target receiver dynamically
-    let receiverId = null;
-    if (type === 'offer' || type === 'answer' || type === 'ice-candidate') {
-      if (payload && payload.receiver) {
-        receiverId = payload.receiver;
-      } else {
-        // Fallback target routing: send to the other active participant
-        if (currentUserIdStr === studentAStr) {
-          receiverId = studentBStr;
-        } else {
-          receiverId = studentAStr;
-        }
-      }
-    }
-
+    // Backend calculates receiver; never trust frontend payload.receiver
+    const receiverId = (currentUserIdStr === studentAStr) ? studentBStr : studentAStr;
     if (!receiverId) {
-      return res.status(400).json({ message: 'Target receiver for signal could not be determined.' });
+      return res.status(400).json({ message: 'Target receiver could not be determined.' });
     }
 
     if (!meeting.signals) meeting.signals = [];
@@ -968,7 +975,8 @@ app.post('/api/meet/room/:roomId/signal', auth(), async (req, res) => {
       receiver: receiverId,
       type,
       payload,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      acknowledged: false
     });
 
     await meeting.save();
@@ -983,6 +991,9 @@ app.get('/api/meet/room/:roomId/signal', auth(), async (req, res) => {
   try {
     const meeting = await LearningSession.findOne({ roomId: req.params.roomId });
     if (!meeting) return res.status(404).json({ message: 'Room not found' });
+    if (meeting.status === 'COMPLETED' || meeting.status === 'CANCELLED') {
+      return res.status(410).json({ message: 'Meeting is no longer active.' });
+    }
 
     const currentUserIdStr = req.user.id.toString();
     const studentAStr = meeting.studentA ? meeting.studentA.toString() : '';
@@ -993,27 +1004,55 @@ app.get('/api/meet/room/:roomId/signal', auth(), async (req, res) => {
       return res.status(403).json({ message: 'Forbidden: You are not a participant of this meeting room.' });
     }
 
-    // Filter signals intended strictly for the authenticated user and remove them atomically from the document
-    const signalsToDeliver = [];
-    const remainingSignals = [];
+    // Return ONLY unacknowledged signals for the current user without deleting them permanently
+    const unacknowledgedSignals = (meeting.signals || []).filter(
+      sig => sig.receiver && sig.receiver.toString() === currentUserIdStr && !sig.acknowledged
+    );
 
-    for (const sig of (meeting.signals || [])) {
-      if (sig.receiver && sig.receiver.toString() === currentUserIdStr) {
-        signalsToDeliver.push(sig);
-      } else {
-        remainingSignals.push(sig);
-      }
-    }
-
-    if (signalsToDeliver.length > 0) {
-      meeting.signals = remainingSignals;
-      await meeting.save();
-    }
-
-    res.json({ signals: signalsToDeliver });
+    res.json({ signals: unacknowledgedSignals });
   } catch (err) {
     console.error('Error fetching signals:', err);
     res.status(500).json({ message: 'Server error fetching signals' });
+  }
+});
+
+// Explicit Acknowledgment Endpoint to safely clear signals only after client processing
+app.post('/api/meet/room/:roomId/signal/ack', auth(), async (req, res) => {
+  try {
+    const { signalIds } = req.body;
+    if (!signalIds || !Array.isArray(signalIds)) {
+      return res.status(400).json({ message: 'signalIds array is required.' });
+    }
+
+    const meeting = await LearningSession.findOne({ roomId: req.params.roomId });
+    if (!meeting) return res.status(404).json({ message: 'Room not found' });
+
+    const currentUserIdStr = req.user.id.toString();
+    let updated = false;
+
+    for (const sig of meeting.signals) {
+      if (
+        sig.receiver &&
+        sig.receiver.toString() === currentUserIdStr &&
+        signalIds.includes(sig._id.toString())
+      ) {
+        sig.acknowledged = true;
+        updated = true;
+      }
+    }
+
+    if (updated) {
+      // Clean up fully acknowledged or old signals to prevent document bloat
+      meeting.signals = meeting.signals.filter(
+        sig => !sig.acknowledged || (Date.now() - sig.timestamp < 300000)
+      );
+      await meeting.save();
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error acknowledging signals:', err);
+    res.status(500).json({ message: 'Server error acknowledging signals' });
   }
 });
 
@@ -1024,6 +1063,12 @@ app.post('/api/meet/room/:roomId/leave', auth(), async (req, res) => {
       const currentUserIdStr = req.user.id.toString();
       const studentAStr = meeting.studentA ? meeting.studentA.toString() : '';
       const studentBStr = meeting.studentB ? meeting.studentB.toString() : '';
+      const hostIdStr = meeting.hostId ? meeting.hostId.toString() : '';
+
+      if (currentUserIdStr !== studentAStr && currentUserIdStr !== studentBStr && currentUserIdStr !== hostIdStr) {
+        return res.status(403).json({ message: 'Forbidden.' });
+      }
+
       const targetReceiver = (currentUserIdStr === studentAStr) ? studentBStr : studentAStr;
 
       if (!meeting.signals) meeting.signals = [];
@@ -1032,7 +1077,8 @@ app.post('/api/meet/room/:roomId/leave', auth(), async (req, res) => {
         receiver: targetReceiver,
         type: 'participant-left',
         payload: { userId: req.user.id },
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        acknowledged: false
       });
       await meeting.save();
     }
@@ -1044,12 +1090,24 @@ app.post('/api/meet/room/:roomId/leave', auth(), async (req, res) => {
 
 app.put('/api/meet/room/:roomId/end', auth(), async (req, res) => {
   try {
-    const meeting = await LearningSession.findOneAndUpdate(
-      { roomId: req.params.roomId },
-      { status: 'COMPLETED', endedAt: new Date() },
-      { new: true }
-    );
+    const meeting = await LearningSession.findOne({ roomId: req.params.roomId });
     if (!meeting) return res.status(404).json({ message: 'Meeting room not found.' });
+
+    const currentUserIdStr = req.user.id.toString();
+    const hostIdStr = meeting.hostId ? meeting.hostId.toString() : '';
+
+    if (currentUserIdStr !== hostIdStr) {
+      return res.status(403).json({ message: 'Forbidden: Only the meeting host can end the session for everyone.' });
+    }
+
+    if (meeting.status === 'COMPLETED') {
+      return res.status(400).json({ message: 'Meeting has already been completed.' });
+    }
+
+    meeting.status = 'COMPLETED';
+    meeting.endedAt = new Date();
+    await meeting.save();
+
     res.json({ success: true, meeting });
   } catch (err) {
     res.status(500).json({ message: 'Failed to end meeting' });
