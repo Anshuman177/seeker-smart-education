@@ -98,6 +98,7 @@ export default function SeekerMeet() {
   const isSpeechRunningRef = useRef(false);
   const iceCandidateQueueRef = useRef([]);
   const pendingCaptionQueueRef = useRef([]);
+  const lastProcessedCaptionKeyRef = useRef('');
 
   // Mutable refs for UI values so that WebRTC connection does not reinitialize on UI changes
   const targetLanguageRef = useRef(targetLanguage);
@@ -200,8 +201,8 @@ export default function SeekerMeet() {
 
   const performTranslation = async (text, sourceLangCode, targetLangCode) => {
     if (!text) return text;
-    const srcShort = sourceLangCode ? sourceLangCode.split('-')[0] : 'auto';
-    const tgtShort = targetLangCode ? targetLangCode.split('-')[0] : 'en';
+    const srcShort = sourceLangCode ? sourceLangCode.split('-')[0].toLowerCase() : 'en';
+    const tgtShort = targetLangCode ? targetLangCode.split('-')[0].toLowerCase() : 'en';
     if (srcShort === tgtShort) return text;
 
     try {
@@ -241,6 +242,18 @@ export default function SeekerMeet() {
 
   const handleIncomingRemoteSpeech = useCallback(async (payload) => {
     if (!captionsEnabledRef.current && !audioDubbingEnabledRef.current) return;
+
+    // Duplicate caption guard using rawText + sourceLang within a time window
+    const captionKey = `${payload.sourceLang}-${payload.rawText}`;
+    if (lastProcessedCaptionKeyRef.current === captionKey) {
+      return;
+    }
+    lastProcessedCaptionKeyRef.current = captionKey;
+    setTimeout(() => {
+      if (lastProcessedCaptionKeyRef.current === captionKey) {
+        lastProcessedCaptionKeyRef.current = '';
+      }
+    }, 3000);
 
     const translatedText = await performTranslation(payload.rawText, payload.sourceLang || 'en-US', targetLanguageRef.current);
 
@@ -483,7 +496,10 @@ export default function SeekerMeet() {
     if (isSpeechRunningRef.current) return;
 
     try {
-      if (recognitionRef.current) recognitionRef.current.abort();
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort(); } catch (e) {}
+        recognitionRef.current = null;
+      }
 
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
@@ -525,11 +541,7 @@ export default function SeekerMeet() {
 
       recognition.onend = () => {
         isSpeechRunningRef.current = false;
-        if ((captionsEnabledRef.current || audioDubbingEnabledRef.current) && micActive) {
-          setTimeout(() => {
-            try { recognition.start(); } catch (e) {}
-          }, 250);
-        }
+        // Do not aggressively restart in a tight loop to prevent mobile microphone chime sounds ("tu-dung")
       };
 
       recognition.start();
