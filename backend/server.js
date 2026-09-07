@@ -1114,6 +1114,41 @@ app.put('/api/meet/room/:roomId/end', auth(), async (req, res) => {
   }
 });
 
+// Added Meeting Message Route supporting Chat & Shared Notes
+app.post('/api/meet/room/:roomId/message', auth(), async (req, res) => {
+  try {
+    const { message, sharedNotes } = req.body;
+    const meeting = await LearningSession.findOne({ roomId: req.params.roomId });
+    if (!meeting) return res.status(404).json({ message: 'Room not found' });
+
+    let updated = false;
+    if (message && message.trim()) {
+      const senderUser = await User.findById(req.user.id);
+      if (!meeting.chatMessages) meeting.chatMessages = [];
+      meeting.chatMessages.push({
+        senderName: senderUser ? senderUser.name : 'User',
+        message: message.trim(),
+        sentAt: new Date()
+      });
+      updated = true;
+    }
+
+    if (sharedNotes !== undefined) {
+      meeting.sharedNotes = sharedNotes;
+      updated = true;
+    }
+
+    if (updated) {
+      await meeting.save();
+    }
+
+    res.json({ success: true, meeting });
+  } catch (err) {
+    console.error('Error updating meeting message/notes:', err);
+    res.status(500).json({ message: 'Server error updating meeting' });
+  }
+});
+
 // ==========================================
 // 6. SEEKER STUDIO: CODE EXECUTION ENGINE
 // ==========================================

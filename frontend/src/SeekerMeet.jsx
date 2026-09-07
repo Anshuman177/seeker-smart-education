@@ -16,13 +16,21 @@ import {
   CheckCircle2, 
   ScreenShare, 
   StopCircle,
-  Subtitles,
   Minimize2,
   Radio,
   LogOut,
   Star,
-  AlertCircle
+  AlertCircle,
+  Languages
 } from 'lucide-react';
+
+const CHAT_LANGUAGES = [
+  { code: 'en', label: 'English' },
+  { code: 'hi', label: 'Hindi' },
+  { code: 'es', label: 'Spanish' },
+  { code: 'fr', label: 'French' },
+  { code: 'de', label: 'German' }
+];
 
 const RTC_CONFIG = {
   iceServers: [
@@ -59,6 +67,11 @@ export default function SeekerMeet() {
   const [audioStatus, setAudioStatus] = useState('Connecting...');
   const [localStream, setLocalStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
+
+  // Chat Translation States
+  const [chatTargetLang, setChatTargetLang] = useState('en');
+  const [translatedMessages, setTranslatedMessages] = useState({}); // { [msgIndex]: { text: '...', error: false } }
+  const [translatingIndex, setTranslatingIndex] = useState(null);
 
   // Review & Rating Modal States
   const [rating, setRating] = useState(5);
@@ -129,8 +142,7 @@ export default function SeekerMeet() {
     if (remoteAudioRef.current && remoteStream) {
       remoteAudioRef.current.srcObject = remoteStream;
       remoteAudioRef.current.muted = false;
-      console.log('[SEEKER AUDIO TEST] Remote audio element playing');
-      console.log('[SEEKER AUDIO TEST] Remote audio element muted:', remoteAudioRef.current.muted);
+      console.log('[SEEKER AUDIO TEST] Remote audio playback enabled');
       remoteAudioRef.current.play().catch(err => {
         console.warn('[SEEKER RTC] Remote audio autoplay blocked:', err);
       });
@@ -341,9 +353,6 @@ export default function SeekerMeet() {
         stream.getVideoTracks().forEach(t => { t.enabled = true; });
         stream.getAudioTracks().forEach(t => { t.enabled = true; });
 
-        console.log('[SEEKER AUDIO TEST] Local microphone stream created');
-        console.log('[SEEKER AUDIO TEST] Local audio tracks:', stream.getAudioTracks().map(t => t.label));
-
         setLocalStream(stream);
         setMicActive(true);
         setVideoActive(true);
@@ -382,6 +391,39 @@ export default function SeekerMeet() {
       terminateLocalMedia();
     };
   }, [roomId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const translateChatMessage = async (text, targetLang) => {
+    try {
+      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data && data[0]) {
+        return data[0].map(item => item[0]).join('');
+      }
+    } catch (e) {
+      console.warn('Chat translation error:', e);
+    }
+    throw new Error('Translation failed');
+  };
+
+  const handleTranslateMessage = async (index, text) => {
+    if (translatedMessages[index]?.text) return; // Cached
+    setTranslatingIndex(index);
+    try {
+      const translated = await translateChatMessage(text, chatTargetLang);
+      setTranslatedMessages(prev => ({
+        ...prev,
+        [index]: { text: translated, error: false }
+      }));
+    } catch (err) {
+      setTranslatedMessages(prev => ({
+        ...prev,
+        [index]: { text: 'Translation unavailable. Try again.', error: true }
+      }));
+    } finally {
+      setTranslatingIndex(null);
+    }
+  };
 
   const toggleMic = () => {
     if (localStreamRef.current) {
@@ -529,6 +571,7 @@ export default function SeekerMeet() {
   const hostName = hostObj?.name || (hostObj === currentUserId ? user?.name : null);
   const isHostComputed = Boolean(session && String(hostObj?._id || hostObj) === String(currentUserId));
   const peerName = peer?.name || (isHostComputed ? (session?.studentA?.name || session?.studentB?.name) : hostName) || 'Connected User';
+  const currentUserName = user?.name || 'You';
 
   if (meetingEnded) {
     return (
@@ -715,7 +758,7 @@ export default function SeekerMeet() {
                   <div className="w-20 h-20 rounded-full bg-indigo-600/30 border border-indigo-500 flex items-center justify-center text-xl font-bold text-indigo-400 mb-2">
                     {user?.name?.charAt(0) || 'U'}
                   </div>
-                  <span className="text-sm font-semibold text-white">{user?.name || 'You'} (You)</span>
+                  <span className="text-sm font-semibold text-white">{currentUserName} (You)</span>
                   <span className="text-xs text-emerald-400 mt-1 flex items-center gap-1">
                     <CheckCircle2 className="w-3.5 h-3.5" /> Present in Room
                   </span>
@@ -808,29 +851,82 @@ export default function SeekerMeet() {
           </div>
         </div>
 
-        {/* Right Side: Chat */}
+        {/* Right Side: Chat & Multilingual Translation */}
         <div className="lg:col-span-4 bg-slate-900 border-l border-slate-800 flex flex-col h-full">
-          <div className="p-4 border-b border-slate-800 font-bold text-xs uppercase tracking-wider text-slate-400 flex items-center gap-2">
-            <Users className="w-4 h-4 text-indigo-400" /> SEEKER Meet Chat
+          <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+            <div className="font-bold text-xs uppercase tracking-wider text-slate-400 flex items-center gap-2">
+              <Users className="w-4 h-4 text-indigo-400" /> SEEKER Meet Chat
+            </div>
+            
+            {/* Chat Target Language Selector */}
+            <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
+              <Languages className="w-3.5 h-3.5 text-indigo-400" />
+              <select
+                value={chatTargetLang}
+                onChange={(e) => setChatTargetLang(e.target.value)}
+                className="bg-transparent text-[11px] text-white focus:outline-none cursor-pointer font-semibold"
+              >
+                {CHAT_LANGUAGES.map((lang) => (
+                  <option key={`chat-lang-${lang.code}`} value={lang.code} className="bg-slate-900 text-white">
+                    Translate to {lang.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div className="flex-1 p-4 overflow-y-auto space-y-3">
             {session?.chatMessages?.length === 0 ? (
               <p className="text-xs text-slate-500 text-center mt-10">No messages yet. Say hi to your partner!</p>
             ) : (
-              session?.chatMessages?.map((msg, i) => (
-                <div
-                  key={i}
-                  className={`p-3 rounded-xl text-xs ${
-                    msg.senderName === user?.name
-                      ? 'bg-indigo-600/30 border border-indigo-500/40 text-white ml-6'
-                      : 'bg-slate-950 border border-slate-800 text-slate-300 mr-6'
-                  }`}
-                >
-                  <span className="text-[10px] font-bold text-indigo-300 block mb-1">{msg.senderName}</span>
-                  <p>{msg.message}</p>
-                </div>
-              ))
+              session?.chatMessages?.map((msg, i) => {
+                const isOwnMessage = msg.senderName === currentUserName || (user?.name && msg.senderName === user.name);
+                const translationEntry = translatedMessages[i];
+
+                return (
+                  <div
+                    key={i}
+                    className={`p-3 rounded-xl text-xs space-y-2 ${
+                      isOwnMessage
+                        ? 'bg-indigo-600/30 border border-indigo-500/40 text-white ml-6'
+                        : 'bg-slate-950 border border-slate-800 text-slate-300 mr-6'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-indigo-300">{msg.senderName}</span>
+                      <span className="text-[9px] text-slate-500">
+                        {new Date(msg.sentAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+
+                    <p className="text-white leading-relaxed">Original: {msg.message}</p>
+
+                    {/* Translation Section for Other User's Messages */}
+                    {!isOwnMessage && (
+                      <div className="pt-1 border-t border-slate-800/80">
+                        {translationEntry ? (
+                          <div className={`text-[11px] font-medium leading-relaxed ${translationEntry.error ? 'text-amber-400' : 'text-emerald-400'}`}>
+                            <span className="text-[9px] uppercase tracking-wider text-slate-400 block font-bold mb-0.5">
+                              Translation ({CHAT_LANGUAGES.find(l => l.code === chatTargetLang)?.label || chatTargetLang}):
+                            </span>
+                            {translationEntry.text}
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={translatingIndex === i}
+                            onClick={() => handleTranslateMessage(i, msg.message)}
+                            className="text-[10px] bg-indigo-600/30 hover:bg-indigo-600 text-indigo-300 hover:text-white px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1 disabled:opacity-50"
+                          >
+                            <Languages className="w-3 h-3" />
+                            {translatingIndex === i ? 'Translating...' : `Translate to ${CHAT_LANGUAGES.find(l => l.code === chatTargetLang)?.label || chatTargetLang}`}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
             )}
           </div>
 
@@ -839,7 +935,7 @@ export default function SeekerMeet() {
               type="text"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              placeholder="Ask a question..."
+              placeholder="Type a message..."
               className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
             />
             <button
