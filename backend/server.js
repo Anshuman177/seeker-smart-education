@@ -34,9 +34,6 @@ function shuffle(arr) {
   return a;
 }
 
-// In-Memory Signaling Store for Browser-Native WebRTC
-const meetSignalingStore = new Map();
-
 function hasScheduledTimeArrived(scheduledDate, scheduledTime) {
   if (!scheduledDate || !scheduledTime) return false;
   const sessionDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`);
@@ -350,7 +347,6 @@ app.get('/api/library/search', auth(), async (req, res) => {
   }
 });
 
-// 100% ERROR-FREE & BULLETPROOF DYNAMIC TOPIC QUESTION SYNTHESISER
 function synthesizeQuestionsForTopic(skillName, targetCount) {
   const cleanSkill = (skillName || 'Computer Science').trim();
   const difficulties = ['Easy', 'Medium', 'Hard'];
@@ -836,7 +832,8 @@ app.put('/api/studyswap/request/:id', auth(), async (req, res) => {
           durationMinutes: finalDuration,
           scheduledDate: finalDate,
           scheduledTime: finalTime,
-          status: isAlreadyTime ? 'LIVE' : 'SCHEDULED'
+          status: isAlreadyTime ? 'LIVE' : 'SCHEDULED',
+          signals: []
         });
         await session.save();
       }
@@ -906,7 +903,161 @@ app.delete('/api/user/notifications/:id', auth(), async (req, res) => {
 });
 
 // ==========================================
-// 5. SEEKER STUDIO: CODE EXECUTION ENGINE
+// 5. SEEKER MEET: REST SIGNALING & ROOM ROUTES
+// ==========================================
+
+app.get('/api/meet/room/:roomId', auth(), async (req, res) => {
+  try {
+    const meeting = await LearningSession.findOne({ roomId: req.params.roomId })
+      .populate('hostId', 'name email college skillsTeach skillsLearn')
+      .populate('studentA', 'name email college skillsTeach skillsLearn')
+      .populate('studentB', 'name email college skillsTeach skillsLearn');
+
+    if (!meeting) {
+      return res.status(404).json({ message: 'Meeting room not found.' });
+    }
+    if (meeting.status === 'COMPLETED') {
+      return res.status(410).json({ message: 'Meeting has already concluded.' });
+    }
+    res.json(meeting);
+  } catch (err) {
+    console.error('Error fetching room:', err);
+    res.status(500).json({ message: 'Server error fetching room.' });
+  }
+});
+
+app.post('/api/meet/room/:roomId/signal', auth(), async (req, res) => {
+  try {
+    const { type, payload } = req.body;
+    const meeting = await LearningSession.findOne({ roomId: req.params.roomId });
+    if (!meeting) return res.status(404).json({ message: 'Room not found' });
+
+    // Verify user is a member of this meeting session
+    const currentUserIdStr = req.user.id.toString();
+    const studentAStr = meeting.studentA ? meeting.studentA.toString() : '';
+    const studentBStr = meeting.studentB ? meeting.studentB.toString() : '';
+    const hostIdStr = meeting.hostId ? meeting.hostId.toString() : '';
+
+    if (currentUserIdStr !== studentAStr && currentUserIdStr !== studentBStr && currentUserIdStr !== hostIdStr) {
+      return res.status(403).json({ message: 'Forbidden: You are not a participant of this meeting room.' });
+    }
+
+    // Determine the target receiver dynamically
+    let receiverId = null;
+    if (type === 'offer' || type === 'answer' || type === 'ice-candidate') {
+      if (payload && payload.receiver) {
+        receiverId = payload.receiver;
+      } else {
+        // Fallback target routing: send to the other active participant
+        if (currentUserIdStr === studentAStr) {
+          receiverId = studentBStr;
+        } else {
+          receiverId = studentAStr;
+        }
+      }
+    }
+
+    if (!receiverId) {
+      return res.status(400).json({ message: 'Target receiver for signal could not be determined.' });
+    }
+
+    if (!meeting.signals) meeting.signals = [];
+
+    meeting.signals.push({
+      sender: req.user.id,
+      receiver: receiverId,
+      type,
+      payload,
+      timestamp: Date.now()
+    });
+
+    await meeting.save();
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error posting signal:', err);
+    res.status(500).json({ message: 'Server error posting signal' });
+  }
+});
+
+app.get('/api/meet/room/:roomId/signal', auth(), async (req, res) => {
+  try {
+    const meeting = await LearningSession.findOne({ roomId: req.params.roomId });
+    if (!meeting) return res.status(404).json({ message: 'Room not found' });
+
+    const currentUserIdStr = req.user.id.toString();
+    const studentAStr = meeting.studentA ? meeting.studentA.toString() : '';
+    const studentBStr = meeting.studentB ? meeting.studentB.toString() : '';
+    const hostIdStr = meeting.hostId ? meeting.hostId.toString() : '';
+
+    if (currentUserIdStr !== studentAStr && currentUserIdStr !== studentBStr && currentUserIdStr !== hostIdStr) {
+      return res.status(403).json({ message: 'Forbidden: You are not a participant of this meeting room.' });
+    }
+
+    // Filter signals intended strictly for the authenticated user and remove them atomically from the document
+    const signalsToDeliver = [];
+    const remainingSignals = [];
+
+    for (const sig of (meeting.signals || [])) {
+      if (sig.receiver && sig.receiver.toString() === currentUserIdStr) {
+        signalsToDeliver.push(sig);
+      } else {
+        remainingSignals.push(sig);
+      }
+    }
+
+    if (signalsToDeliver.length > 0) {
+      meeting.signals = remainingSignals;
+      await meeting.save();
+    }
+
+    res.json({ signals: signalsToDeliver });
+  } catch (err) {
+    console.error('Error fetching signals:', err);
+    res.status(500).json({ message: 'Server error fetching signals' });
+  }
+});
+
+app.post('/api/meet/room/:roomId/leave', auth(), async (req, res) => {
+  try {
+    const meeting = await LearningSession.findOne({ roomId: req.params.roomId });
+    if (meeting) {
+      const currentUserIdStr = req.user.id.toString();
+      const studentAStr = meeting.studentA ? meeting.studentA.toString() : '';
+      const studentBStr = meeting.studentB ? meeting.studentB.toString() : '';
+      const targetReceiver = (currentUserIdStr === studentAStr) ? studentBStr : studentAStr;
+
+      if (!meeting.signals) meeting.signals = [];
+      meeting.signals.push({
+        sender: req.user.id,
+        receiver: targetReceiver,
+        type: 'participant-left',
+        payload: { userId: req.user.id },
+        timestamp: Date.now()
+      });
+      await meeting.save();
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+app.put('/api/meet/room/:roomId/end', auth(), async (req, res) => {
+  try {
+    const meeting = await LearningSession.findOneAndUpdate(
+      { roomId: req.params.roomId },
+      { status: 'COMPLETED', endedAt: new Date() },
+      { new: true }
+    );
+    if (!meeting) return res.status(404).json({ message: 'Meeting room not found.' });
+    res.json({ success: true, meeting });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to end meeting' });
+  }
+});
+
+// ==========================================
+// 6. SEEKER STUDIO: CODE EXECUTION ENGINE
 // ==========================================
 
 app.post('/api/studio/execute', auth(), async (req, res) => {
