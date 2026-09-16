@@ -16,6 +16,8 @@ import {
   CheckCircle2, 
   ScreenShare, 
   StopCircle,
+  Subtitles,
+  Globe,
   Minimize2,
   Radio,
   LogOut,
@@ -23,6 +25,14 @@ import {
   AlertCircle,
   Languages
 } from 'lucide-react';
+
+const SUPPORTED_LANGUAGES = [
+  { code: 'en-US', label: 'English (US)' },
+  { code: 'hi-IN', label: 'Hindi (हिंदी)' },
+  { code: 'es-ES', label: 'Spanish (Español)' },
+  { code: 'fr-FR', label: 'French (Français)' },
+  { code: 'de-DE', label: 'German (Deutsch)' }
+];
 
 const CHAT_LANGUAGES = [
   { code: 'en', label: 'English' },
@@ -68,9 +78,15 @@ export default function SeekerMeet() {
   const [localStream, setLocalStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
 
+  // Multilingual & CC Settings
+  const [captionsEnabled, setCaptionsEnabled] = useState(true);
+  const [sourceLanguage, setSourceLanguage] = useState('en-US');
+  const [targetLanguage, setTargetLanguage] = useState('en-US');
+  const [activeSubtitle, setActiveSubtitle] = useState(null);
+
   // Chat Translation States
   const [chatTargetLang, setChatTargetLang] = useState('en');
-  const [translatedMessages, setTranslatedMessages] = useState({}); // { [msgIndex]: { text: '...', error: false } }
+  const [translatedMessages, setTranslatedMessages] = useState({});
   const [translatingIndex, setTranslatingIndex] = useState(null);
 
   // Review & Rating Modal States
@@ -85,9 +101,23 @@ export default function SeekerMeet() {
   const remoteVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
   const peerConnectionRef = useRef(null);
+  const dataChannelRef = useRef(null);
+  const recognitionRef = useRef(null);
   const screenStreamRef = useRef(null);
   const processedSignalIdsRef = useRef(new Set());
+  const subtitleTimeoutRef = useRef(null);
+  const isSpeechRunningRef = useRef(false);
   const iceCandidateQueueRef = useRef([]);
+  const pendingCaptionQueueRef = useRef([]);
+  const lastProcessedCaptionKeyRef = useRef('');
+
+  // Mutable refs for UI values
+  const targetLanguageRef = useRef(targetLanguage);
+  targetLanguageRef.current = targetLanguage;
+  const captionsEnabledRef = useRef(captionsEnabled);
+  captionsEnabledRef.current = captionsEnabled;
+  const sourceLanguageRef = useRef(sourceLanguage);
+  sourceLanguageRef.current = sourceLanguage;
   const remoteAudioAvailableRef = useRef(false);
 
   const currentUserId = user?.id || user?._id;
@@ -105,18 +135,30 @@ export default function SeekerMeet() {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch (e) {}
+      recognitionRef.current = null;
+    }
 
+    dataChannelRef.current = null;
     remoteStreamRef.current = null;
     setLocalStream(null);
     setRemoteStream(null);
     remoteAudioAvailableRef.current = false;
     iceCandidateQueueRef.current = [];
+    pendingCaptionQueueRef.current = [];
     processedSignalIdsRef.current.clear();
+
+    if (subtitleTimeoutRef.current) {
+      clearTimeout(subtitleTimeoutRef.current);
+      subtitleTimeoutRef.current = null;
+    }
 
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
 
+    setActiveSubtitle(null);
     setAudioStatus('Connecting...');
   }, []);
 
@@ -142,7 +184,7 @@ export default function SeekerMeet() {
     if (remoteAudioRef.current && remoteStream) {
       remoteAudioRef.current.srcObject = remoteStream;
       remoteAudioRef.current.muted = false;
-      console.log('[SEEKER AUDIO TEST] Remote audio playback enabled');
+      console.log('[SEEKER AUDIO] Remote audio playback enabled');
       remoteAudioRef.current.play().catch(err => {
         console.warn('[SEEKER RTC] Remote audio autoplay blocked:', err);
       });
@@ -156,6 +198,86 @@ export default function SeekerMeet() {
       console.error('[SEEKER RTC] Error sending signal:', type, e);
     }
   };
+
+  const performTranslation = async (text, sourceLangCode, targetLangCode) => {
+    if (!text) return text;
+    const srcShort = sourceLangCode ? sourceLangCode.split('-')[0].toLowerCase() : 'auto';
+    const tgtShort = targetLangCode ? targetLangCode.split('-')[0].toLowerCase() : 'en';
+    if (srcShort === tgtShort) return text;
+
+    try {
+      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${srcShort}&tl=${tgtShort}&dt=t&q=${encodeURIComponent(text)}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data && data[0]) {
+        return data[0].map(item => item[0]).join('');
+      }
+    } catch (e) {
+      console.warn('Translation fallback error:', e);
+    }
+    return text;
+  };
+
+  const handleIncomingRemoteSpeech = useCallback(async (payload) => {
+    if (!captionsEnabledRef.current) return;
+
+    // Duplicate caption guard using rawText + sourceLang within a time window
+    const captionKey = `${payload.sourceLang}-${payload.rawText}`;
+    if (lastProcessedCaptionKeyRef.current === captionKey) {
+      return;
+    }
+    lastProcessedCaptionKeyRef.current = captionKey;
+    setTimeout(() => {
+      if (lastProcessedCaptionKeyRef.current === captionKey) {
+        lastProcessedCaptionKeyRef.current = '';
+      }
+    }, 3000);
+
+    const translatedText = await performTranslation(payload.rawText, payload.sourceLang || 'en-US', targetLanguageRef.current);
+
+    if (captionsEnabledRef.current) {
+      setActiveSubtitle({
+        speakerName: payload.speakerName,
+        text: translatedText
+      });
+
+      if (subtitleTimeoutRef.current) clearTimeout(subtitleTimeoutRef.current);
+      subtitleTimeoutRef.current = setTimeout(() => {
+        setActiveSubtitle(null);
+      }, 6000);
+    }
+  }, []);
+
+  const setupDataChannel = useCallback((channel) => {
+    dataChannelRef.current = channel;
+
+    channel.onopen = () => {
+      while (channel.readyState === 'open' && pendingCaptionQueueRef.current.length > 0) {
+        channel.send(JSON.stringify(pendingCaptionQueueRef.current.shift()));
+      }
+    };
+
+    channel.onclose = () => {
+      if (dataChannelRef.current === channel) {
+        dataChannelRef.current = null;
+      }
+    };
+
+    channel.onerror = (err) => {
+      console.error('[SEEKER RTC] DataChannel error:', err);
+    };
+
+    channel.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload.type === 'caption') {
+          handleIncomingRemoteSpeech(payload);
+        }
+      } catch (err) {
+        console.warn('DataChannel message parse error:', err);
+      }
+    };
+  }, [handleIncomingRemoteSpeech]);
 
   const createAndSendOffer = useCallback(async () => {
     const pc = peerConnectionRef.current;
@@ -201,7 +323,7 @@ export default function SeekerMeet() {
     }
 
     pc.ontrack = (event) => {
-      console.log('[SEEKER AUDIO TEST] Remote audio track received');
+      console.log('[SEEKER AUDIO] Remote audio track received');
       if (event.track.kind === 'audio') {
         remoteAudioAvailableRef.current = true;
       }
@@ -222,7 +344,6 @@ export default function SeekerMeet() {
       setRemoteStream(stream);
 
       const state = pc.connectionState;
-      console.log('[SEEKER AUDIO TEST] WebRTC connection state:', state);
       if (state === 'connected' && remoteAudioAvailableRef.current) {
         setAudioStatus('Audio Connected');
       }
@@ -235,7 +356,7 @@ export default function SeekerMeet() {
     };
 
     const updateConnectionState = () => {
-      console.log('[SEEKER AUDIO TEST] WebRTC connection state:', pc.connectionState);
+      console.log('[SEEKER RTC] Connection state:', pc.connectionState);
       const state = pc.connectionState;
       if (state === 'failed' || state === 'disconnected' || state === 'closed') {
         setAudioStatus('Remote audio unavailable');
@@ -250,11 +371,20 @@ export default function SeekerMeet() {
     pc.oniceconnectionstatechange = updateConnectionState;
 
     if (fetchedIsHost) {
+      const dc = pc.createDataChannel('seeker-captions', { reliable: true });
+      setupDataChannel(dc);
+    }
+
+    pc.ondatachannel = (event) => {
+      setupDataChannel(event.channel);
+    };
+
+    if (fetchedIsHost) {
       setTimeout(() => {
         createAndSendOffer();
       }, 1000);
     }
-  }, [createAndSendOffer, currentUserId]);
+  }, [setupDataChannel, createAndSendOffer, currentUserId]);
 
   const pollSignalingChannel = useCallback(async () => {
     const pc = peerConnectionRef.current;
@@ -334,6 +464,79 @@ export default function SeekerMeet() {
     }
   }, [roomId, clearSession, terminateLocalMedia]);
 
+  const startSpeechRecognition = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+    if (isSpeechRunningRef.current) return;
+
+    try {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort(); } catch (e) {}
+        recognitionRef.current = null;
+      }
+
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = sourceLanguageRef.current; // Dynamically uses speaker's spoken language
+
+      recognition.onstart = () => {
+        isSpeechRunningRef.current = true;
+      };
+
+      recognition.onresult = (event) => {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          if (event.results[i].isFinal) {
+            transcript += event.results[i][0].transcript;
+          }
+        }
+
+        const clean = transcript.trim();
+        if (clean.length > 0) {
+          const payload = {
+            type: 'caption',
+            speakerName: user?.name || 'User',
+            rawText: clean,
+            sourceLang: sourceLanguageRef.current
+          };
+
+          if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
+            dataChannelRef.current.send(JSON.stringify(payload));
+          } else {
+            pendingCaptionQueueRef.current.push(payload);
+          }
+        }
+      };
+
+      recognition.onerror = () => {
+        isSpeechRunningRef.current = false;
+      };
+
+      recognition.onend = () => {
+        isSpeechRunningRef.current = false;
+        if (captionsEnabledRef.current && micActive) {
+          setTimeout(() => {
+            try { recognition.start(); } catch (e) {}
+          }, 300);
+        }
+      };
+
+      recognition.start();
+      recognitionRef.current = recognition;
+    } catch (err) {
+      isSpeechRunningRef.current = false;
+    }
+  };
+
+  const stopSpeechRecognition = () => {
+    isSpeechRunningRef.current = false;
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch (e) {}
+      recognitionRef.current = null;
+    }
+  };
+
   const initMeeting = useCallback(async () => {
     console.log('[SEEKER MEET] Loading room');
     try {
@@ -391,6 +594,14 @@ export default function SeekerMeet() {
       terminateLocalMedia();
     };
   }, [roomId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (captionsEnabled && micActive) {
+      startSpeechRecognition();
+    } else {
+      stopSpeechRecognition();
+    }
+  }, [captionsEnabled, micActive, sourceLanguage]);
 
   const translateChatMessage = async (text, targetLang) => {
     try {
@@ -452,6 +663,11 @@ export default function SeekerMeet() {
   };
 
   const toggleScreenShare = async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      alert("Screen sharing is not supported on this device/browser.");
+      return;
+    }
+
     if (isScreenSharing) {
       if (screenStreamRef.current) {
         screenStreamRef.current.getTracks().forEach(t => t.stop());
@@ -461,7 +677,9 @@ export default function SeekerMeet() {
       if (peerConnectionRef.current && localStreamRef.current) {
         const camTrack = localStreamRef.current.getVideoTracks()[0];
         const sender = peerConnectionRef.current.getSenders().find(s => s.track && s.track.kind === 'video');
-        if (sender && camTrack) sender.replaceTrack(camTrack);
+        if (sender && camTrack) {
+          sender.replaceTrack(camTrack).catch(err => console.error("Error restoring camera track:", err));
+        }
       }
     } else {
       try {
@@ -472,20 +690,29 @@ export default function SeekerMeet() {
         const screenTrack = stream.getVideoTracks()[0];
         if (peerConnectionRef.current) {
           const sender = peerConnectionRef.current.getSenders().find(s => s.track && s.track.kind === 'video');
-          if (sender) sender.replaceTrack(screenTrack);
+          if (sender) {
+            sender.replaceTrack(screenTrack).catch(err => console.error("Error replacing track with screen share:", err));
+          }
         }
 
         screenTrack.onended = () => {
           setIsScreenSharing(false);
+          if (screenStreamRef.current) {
+            screenStreamRef.current.getTracks().forEach(t => t.stop());
+            screenStreamRef.current = null;
+          }
           if (peerConnectionRef.current && localStreamRef.current) {
             const camTrack = localStreamRef.current.getVideoTracks()[0];
             const sender = peerConnectionRef.current.getSenders().find(s => s.track && s.track.kind === 'video');
             if (sender && camTrack) {
-              sender.replaceTrack(camTrack).catch(() => {});
+              sender.replaceTrack(camTrack).catch(err => console.error("Error restoring camera after screen share end:", err));
             }
           }
         };
-      } catch (err) {}
+      } catch (err) {
+        console.warn("Screen share cancelled or failed:", err);
+        setIsScreenSharing(false);
+      }
     }
   };
 
@@ -642,7 +869,7 @@ export default function SeekerMeet() {
   }
 
   return (
-    <div className="h-[calc(100vh-4rem)] bg-slate-950 text-white flex flex-col">
+    <div className="min-h-[calc(100vh-4rem)] bg-slate-950 text-white flex flex-col">
       <audio ref={remoteAudioRef} autoPlay playsInline />
 
       {meetError && (
@@ -653,7 +880,7 @@ export default function SeekerMeet() {
       )}
 
       {/* Header */}
-      <div className="bg-slate-900 border-b border-slate-800 px-6 py-3 flex items-center justify-between">
+      <div className="bg-slate-900 border-b border-slate-800 px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div
             className={`w-3 h-3 rounded-full ${
@@ -674,7 +901,7 @@ export default function SeekerMeet() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <div className="text-xs text-slate-400 flex items-center gap-1.5 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">
             <Clock className="w-3.5 h-3.5 text-indigo-400" />
             {session?.durationMinutes || 30} mins
@@ -712,35 +939,7 @@ export default function SeekerMeet() {
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden">
         
         {/* Left Stage */}
-        <div className="lg:col-span-8 p-6 flex flex-col gap-4 overflow-y-auto">
-          
-          {isScreenSharing && (
-            <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-2xl p-4 shadow-2xl relative">
-              <div className="flex items-center justify-between mb-3 px-1">
-                <span className="text-xs font-bold text-emerald-400 flex items-center gap-2">
-                  <ScreenShare className="w-4 h-4" /> Live Screen Sharing Active
-                </span>
-                <button
-                  onClick={toggleScreenShare}
-                  className="text-xs bg-red-600/20 text-red-400 hover:bg-red-600 hover:text-white px-3 py-1 rounded-lg font-semibold transition flex items-center gap-1.5"
-                >
-                  <StopCircle className="w-4 h-4" /> Stop Sharing
-                </button>
-              </div>
-              <video
-                ref={(el) => {
-                  if (el && screenStreamRef.current) {
-                    el.srcObject = screenStreamRef.current;
-                    el.play().catch(() => {});
-                  }
-                }}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-80 object-contain rounded-xl bg-black border border-slate-800"
-              />
-            </div>
-          )}
+        <div className="lg:col-span-8 p-4 sm:p-6 flex flex-col gap-4 overflow-y-auto">
 
           {/* Videos Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 relative">
@@ -801,8 +1000,23 @@ export default function SeekerMeet() {
             </div>
           </div>
 
+          {/* Subtitle Banner */}
+          {captionsEnabled && activeSubtitle && activeSubtitle.text && (
+            <div className="bg-slate-900/95 border-2 border-indigo-500 rounded-xl p-3.5 shadow-2xl flex items-start gap-3 animate-in fade-in transition-all">
+              <span className="px-2.5 py-1 rounded-lg bg-indigo-600 text-[10px] font-black uppercase tracking-wider shrink-0 mt-0.5">
+                LIVE CC ({targetLanguage.split('-')[0].toUpperCase()})
+              </span>
+              <div className="text-xs text-slate-100 leading-relaxed font-medium">
+                <strong className="text-indigo-400 mr-2">{activeSubtitle.speakerName}:</strong>
+                <span className="text-white font-semibold">
+                  {activeSubtitle.text}
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Scratchpad Whiteboard */}
-          <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col">
+          <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col min-h-[160px]">
             <div className="flex items-center gap-2 mb-2">
               <FileText className="w-4 h-4 text-indigo-400" />
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
@@ -813,7 +1027,7 @@ export default function SeekerMeet() {
               value={notes}
               onChange={(e) => handleNotesChange(e.target.value)}
               placeholder="Write explanation notes, code snippets, or solutions here. Syncs live across users..."
-              className="flex-1 min-h-[130px] bg-slate-950 border border-slate-800 rounded-xl p-4 font-mono text-xs text-emerald-400 focus:outline-none focus:border-indigo-500"
+              className="flex-1 min-h-[120px] bg-slate-950 border border-slate-800 rounded-xl p-4 font-mono text-xs text-emerald-400 focus:outline-none focus:border-indigo-500"
             />
           </div>
 
@@ -848,12 +1062,56 @@ export default function SeekerMeet() {
               <ScreenShare className="w-4 h-4" />
               {isScreenSharing ? 'Stop Sharing' : 'Share Screen'}
             </button>
+
+            <button
+              onClick={() => setCaptionsEnabled(!captionsEnabled)}
+              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition ${
+                captionsEnabled ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+              }`}
+            >
+              <Subtitles className="w-4 h-4" />
+              {captionsEnabled ? 'CC ON' : 'CC OFF'}
+            </button>
+
+            {/* Language Selectors */}
+            <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
+              <Globe className="w-3.5 h-3.5 text-indigo-400" />
+              <div className="flex flex-col">
+                <span className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">My Spoken Lang</span>
+                <select
+                  value={sourceLanguage}
+                  onChange={(e) => setSourceLanguage(e.target.value)}
+                  className="bg-transparent text-xs text-white focus:outline-none cursor-pointer font-semibold"
+                >
+                  {SUPPORTED_LANGUAGES.map((lang) => (
+                    <option key={`src-${lang.code}`} value={lang.code} className="bg-slate-900 text-white">
+                      {lang.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="border-l border-slate-800 pl-2 flex flex-col">
+                <span className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Target CC Lang</span>
+                <select
+                  value={targetLanguage}
+                  onChange={(e) => setTargetLanguage(e.target.value)}
+                  className="bg-transparent text-xs text-white focus:outline-none cursor-pointer font-semibold"
+                >
+                  {SUPPORTED_LANGUAGES.map((lang) => (
+                    <option key={`tgt-${lang.code}`} value={lang.code} className="bg-slate-900 text-white">
+                      {lang.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
           </div>
         </div>
 
         {/* Right Side: Chat & Multilingual Translation */}
-        <div className="lg:col-span-4 bg-slate-900 border-l border-slate-800 flex flex-col h-full">
-          <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+        <div className="lg:col-span-4 bg-slate-900 border-l border-slate-800 flex flex-col h-full min-h-[350px]">
+          <div className="p-4 border-b border-slate-800 flex items-center justify-between flex-wrap gap-2">
             <div className="font-bold text-xs uppercase tracking-wider text-slate-400 flex items-center gap-2">
               <Users className="w-4 h-4 text-indigo-400" /> SEEKER Meet Chat
             </div>
