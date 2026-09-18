@@ -9,6 +9,7 @@ const fs = require('fs');
 require('dotenv').config();
 
 const User = require('./models/User');
+const Material = require('./models/Material');
 const { Subject, Quiz, QuizAttempt } = require('./models/Education');
 const { SkillQuestion, SkillAttempt, SkillAssessment } = require('./models/SkillProof');
 const { LearningRequest, LearningSession, Notification } = require('./models/StudySwap');
@@ -21,23 +22,11 @@ app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ limit: '15mb', extended: true }));
 app.use(cors({ origin: '*' }));
 
-// Ensure uploads directory exists for Material Upload feature
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)){
-    fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + '-' + file.originalname);
-  }
+// Multer Memory Storage (Vercel compatible - keeps files in RAM buffer)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 } // Individual file limit 10MB max
 });
-
-const upload = multer({ storage: storage });
 
 app.get('/', (req, res) => {
   res.send('SEEKER Backend API is running successfully!');
@@ -370,7 +359,7 @@ app.get('/api/library/search', auth(), async (req, res) => {
 function synthesizeQuestionsForTopic(skillName, targetCount) {
   const cleanSkill = (skillName || 'Computer Science').trim();
   const difficulties = ['Easy', 'Medium', 'Hard'];
-  
+
   const questionsList = [
     {
       q: `What is the primary architectural objective and core runtime design rule when building applications in ${cleanSkill}?`,
@@ -962,7 +951,7 @@ app.get('/api/meet/room/:roomId', auth(), async (req, res) => {
 app.post('/api/meet/room/:roomId/signal', auth(), async (req, res) => {
   try {
     const { type, payload } = req.body;
-    
+
     const validSignalTypes = ['offer', 'answer', 'ice-candidate', 'participant-left'];
     if (!validSignalTypes.includes(type)) {
       return res.status(400).json({ message: 'Invalid signal type.' });
@@ -1220,30 +1209,49 @@ app.post('/api/studio/execute', auth(), async (req, res) => {
 });
 
 // ==========================================
-// 7. LEARN FROM YOUR MATERIAL — UPLOAD ENDPOINT
+// 7. LEARN FROM YOUR MATERIAL — MONGODB UPLOAD ENDPOINT
 // ==========================================
 
-app.post('/api/material/upload', upload.array('files'), (req, res) => {
+app.post('/api/material/upload', auth(), upload.array('files', 5), async (req, res) => {
   try {
     const { bookName, authorName, topic } = req.body;
     const uploadedFiles = req.files;
 
     if (!uploadedFiles || uploadedFiles.length === 0) {
-      return res.status(400).json({ error: 'Koi file upload nahi ki gayi hai.' });
+      return res.status(400).json({ error: 'Kripya kam se kam ek file select karein.' });
     }
 
-    console.log('Files received:', uploadedFiles.length);
-    console.log('Metadata:', { bookName, authorName, topic });
+    // Total size validation to respect MongoDB 16MB document limit
+    const totalSize = uploadedFiles.reduce((sum, f) => sum + f.size, 0);
+    if (totalSize > 12 * 1024 * 1024) {
+      return res.status(400).json({ error: 'Total files ka size 12MB se kam hona chahiye.' });
+    }
+
+    const fileDocuments = uploadedFiles.map(f => ({
+      originalName: f.originalname,
+      mimeType: f.mimetype,
+      size: f.size,
+      data: f.buffer
+    }));
+
+    const newMaterial = new Material({
+      userId: req.user.id,
+      bookName: bookName || '',
+      authorName: authorName || '',
+      topic: topic || '',
+      files: fileDocuments
+    });
+
+    await newMaterial.save();
 
     res.status(200).json({
-      message: 'Files successfully upload aur receive ho gayi hain!',
-      fileCount: uploadedFiles.length,
-      files: uploadedFiles.map(f => ({ originalName: f.originalname, filename: f.filename, size: f.size })),
-      metadata: { bookName, authorName, topic }
+      message: 'Material successfully upload aur MongoDB mein securely save ho gaya hai!',
+      materialId: newMaterial._id,
+      fileCount: fileDocuments.length
     });
   } catch (err) {
-    console.error('Upload error:', err);
-    res.status(500).json({ error: 'Server error during file upload.' });
+    console.error('Material upload error:', err);
+    res.status(500).json({ error: 'Server error during file upload to database.' });
   }
 });
 
