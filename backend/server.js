@@ -1214,7 +1214,7 @@ app.post('/api/studio/execute', auth(), async (req, res) => {
 
 app.post('/api/material/upload', auth(), upload.array('files', 5), async (req, res) => {
   try {
-    const { bookName, authorName, topic } = req.body;
+    const { bookName, authorName, topic, questionsCount, marksPerQuestion } = req.body;
     const uploadedFiles = req.files;
 
     if (!uploadedFiles || uploadedFiles.length === 0) {
@@ -1239,16 +1239,18 @@ app.post('/api/material/upload', auth(), upload.array('files', 5), async (req, r
       bookName: bookName || '',
       authorName: authorName || '',
       topic: topic || '',
+      questionsCount: parseInt(questionsCount, 10) || 5,
+      marksPerQuestion: marksPerQuestion || '',
       files: fileDocuments
     });
 
     await newMaterial.save();
 
-   res.status(200).json({
-  message: 'Study material successfully uploaded and ready for learning! 🚀',
-  materialId: newMaterial._id,
-  fileCount: fileDocuments.length
-});
+    res.status(200).json({
+      message: 'Study material successfully uploaded and ready for learning! 🚀',
+      materialId: newMaterial._id,
+      fileCount: fileDocuments.length
+    });
   } catch (err) {
     console.error('Material upload error:', err);
     res.status(500).json({ error: 'Server error during file upload to database.' });
