@@ -86,23 +86,23 @@ export default function MaterialUpload() {
   };
 
   return (
-    <div className="material-upload-container" style={{ padding: '30px', color: '#fff', maxWidth: '800px', margin: '0 auto' }}>
+    <div className="material-upload-container" style={{ padding: '30px', color: '#fff', maxWidth: '800px', margin: '0 auto', paddingBottom: '60px' }}>
       <h2>Learn From Your Material</h2>
       <p style={{ color: '#aaa' }}>Apni study material (Book pages, PDFs, Notes) yahan upload karein.</p>
 
       {errorMessage && (
-        <div style={{ background: '#ff4d4d', color: '#fff', padding: '10px', borderRadius: '5px', marginBottom: '15px' }}>
+        <div style={{ background: '#ff4d4d', color: '#fff', padding: '10px', borderRadius: '5px', marginBottom: '15px', marginTop: '10px' }}>
           {errorMessage}
         </div>
       )}
 
       {successMessage && (
-        <div style={{ background: '#2ecc71', color: '#fff', padding: '10px', borderRadius: '5px', marginBottom: '15px' }}>
+        <div style={{ background: '#2ecc71', color: '#fff', padding: '10px', borderRadius: '5px', marginBottom: '15px', marginTop: '10px' }}>
           {successMessage}
         </div>
       )}
 
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} style={{ marginTop: '20px' }}>
         <div style={{ background: '#1e1e2f', padding: '20px', borderRadius: '8px', border: '1px dashed #444' }}>
           <label style={{ display: 'block', marginBottom: '10px', fontWeight: 'bold' }}>
             Study Material Upload (Multiple files/pages allowed):
@@ -114,7 +114,7 @@ export default function MaterialUpload() {
             style={{ marginBottom: '15px', display: 'block' }}
           />
 
-          <div style={{ display: 'grid', gap: '10px', marginBottom: '15px' }}>
+          <div style={{ display: 'grid', gap: '10px', marginBottom: '5px' }}>
             <input
               type="text"
               placeholder="Book Name (Optional)"
@@ -165,26 +165,26 @@ export default function MaterialUpload() {
           )}
         </div>
 
-        {files.length > 0 && (
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              marginTop: '20px',
-              width: '100%',
-              padding: '12px',
-              background: loading ? '#555' : '#4f46e5',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '6px',
-              fontWeight: 'bold',
-              cursor: loading ? 'not-allowed' : 'pointer',
-              transition: 'background 0.2s'
-            }}
-          >
-            {loading ? 'Uploading to Server...' : 'Upload & Process Material 🚀'}
-          </button>
-        )}
+        <button
+          type="submit"
+          disabled={loading || files.length === 0}
+          style={{
+            marginTop: '25px',
+            width: '100%',
+            padding: '14px',
+            background: files.length === 0 ? '#333' : (loading ? '#555' : '#4f46e5'),
+            color: files.length === 0 ? '#777' : '#fff',
+            border: 'none',
+            borderRadius: '8px',
+            fontWeight: 'bold',
+            fontSize: '15px',
+            cursor: files.length === 0 || loading ? 'not-allowed' : 'pointer',
+            transition: 'background 0.2s',
+            boxShadow: '0 4px 12px rgba(79, 70, 229, 0.3)'
+          }}
+        >
+          {loading ? 'Uploading to Server...' : 'Upload & Process Material 🚀'}
+        </button>
       </form>
     </div>
   );
