@@ -11,6 +11,7 @@ import StudySwap from './StudySwap';
 import SeekerMeet from './SeekerMeet';
 import Profile from './Profile';
 import Studio from './Studio';
+import MaterialUpload from './MaterialUpload'; 
 import { MeetingProvider } from './MeetingContext';
 import FloatingMiniMeet from './FloatingMiniMeet';
 
@@ -86,6 +87,7 @@ export default function App() {
                 <Route path="/meet/:roomId" element={<ProtectedRoute><SeekerMeet /></ProtectedRoute>} />
                 <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
                 <Route path="/studio" element={<ProtectedRoute><Studio /></ProtectedRoute>} />
+                <Route path="/material-upload" element={<ProtectedRoute><MaterialUpload /></ProtectedRoute>} /> {/* <-- naya route add kiya */}
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </main>
