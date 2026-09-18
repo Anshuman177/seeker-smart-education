@@ -13,6 +13,10 @@ export default function MaterialUpload() {
   const [successMessage, setSuccessMessage] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Naya state analysis view ke liye
+  const [analysisData, setAnalysisData] = useState(null);
+  const [analyzingLoading, setAnalyzingLoading] = useState(false);
+
   // File selection handler with validation
   const handleFileChange = (e) => {
     const selectedFiles = Array.from(e.target.files);
@@ -52,6 +56,7 @@ export default function MaterialUpload() {
     e.preventDefault();
     setErrorMessage('');
     setSuccessMessage('');
+    setAnalysisData(null);
 
     if (files.length === 0) {
       setErrorMessage('Kripya kam se kam ek study material file select karein.');
@@ -77,17 +82,36 @@ export default function MaterialUpload() {
       });
 
       setSuccessMessage(res.data.message || 'Study material successfully uploaded and ready for learning! 🚀');
+      const uploadedMaterialId = res.data.materialId;
+
+      // Jaise hi upload ho, turant material analyze karne ki API call lagayein
+      if (uploadedMaterialId) {
+        fetchMaterialAnalysis(uploadedMaterialId);
+      }
+
       setFiles([]);
       setBookName('');
       setAuthorName('');
       setTopic('');
-      setQuestionsCount(5);
-      setMarksPerQuestion('');
     } catch (err) {
       console.error('Upload error:', err);
       setErrorMessage(err.response?.data?.error || 'Server error during file upload. Dobara koshish karein.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Material Analyze karne ki function
+  const fetchMaterialAnalysis = async (id) => {
+    try {
+      setAnalyzingLoading(true);
+      const res = await API.get(`/material/analyze/${id}`);
+      setAnalysisData(res.data);
+    } catch (err) {
+      console.error('Analysis error:', err);
+      setErrorMessage('Material upload ho gaya, lekin analysis load karne mein error aaya.');
+    } finally {
+      setAnalyzingLoading(false);
     }
   };
 
@@ -105,6 +129,41 @@ export default function MaterialUpload() {
       {successMessage && (
         <div style={{ background: '#2ecc71', color: '#fff', padding: '10px', borderRadius: '5px', marginBottom: '15px', marginTop: '10px' }}>
           {successMessage}
+        </div>
+      )}
+
+      {/* AGAR ANALYSIS DATA MIL GAYA HAI TOH "WHAT IS THIS MATERIAL ABOUT?" SECTION DIKHAYEIN */}
+      {analysisData && (
+        <div style={{ background: '#1e1e2f', padding: '25px', borderRadius: '8px', border: '1px solid #4f46e5', marginTop: '20px', marginBottom: '30px' }}>
+          <h3 style={{ color: '#818cf8', marginBottom: '15px' }}>📖 What is this material about?</h3>
+          <p style={{ fontSize: '15px', lineHeight: '1.6', color: '#ddd', marginBottom: '20px' }}>
+            {analysisData.about}
+          </p>
+
+          <h4 style={{ color: '#38bdf8', marginBottom: '10px' }}>🔍 Important Concepts:</h4>
+          <ul style={{ paddingLeft: '20px', marginBottom: '20px', color: '#ccc' }}>
+            {analysisData.importantConcepts.map((concept, index) => (
+              <li key={index} style={{ marginBottom: '8px', lineHeight: '1.4' }}>{concept}</li>
+            ))}
+          </ul>
+
+          <h4 style={{ color: '#38bdf8', marginBottom: '10px' }}>📌 Important Points:</h4>
+          <ul style={{ paddingLeft: '20px', color: '#ccc' }}>
+            {analysisData.importantPoints.map((point, index) => (
+              <li key={index} style={{ marginBottom: '8px', lineHeight: '1.4' }}>{point}</li>
+            ))}
+          </ul>
+
+          <div style={{ marginTop: '20px', padding: '12px', background: '#252538', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#aaa' }}>
+            <span>Target Questions: <strong>{analysisData.questionsCount} per section</strong></span>
+            <span>Assigned Marks: <strong>{analysisData.marksPerQuestion || 'Auto-decided'}</strong></span>
+          </div>
+        </div>
+      )}
+
+      {analyzingLoading && (
+        <div style={{ textAlign: 'center', padding: '20px', color: '#818cf8', fontWeight: 'bold' }}>
+          ⚡ Analyzing uploaded material and extracting concepts...
         </div>
       )}
 
@@ -144,7 +203,6 @@ export default function MaterialUpload() {
             />
           </div>
 
-          {/* Naye Inputs: Questions count aur Marks per question */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', borderTop: '1px solid #333', paddingTop: '15px' }}>
             <div>
               <label style={{ display: 'block', fontSize: '13px', marginBottom: '5px', color: '#ccc' }}>
@@ -218,7 +276,7 @@ export default function MaterialUpload() {
             boxShadow: '0 4px 12px rgba(79, 70, 229, 0.3)'
           }}
         >
-          {loading ? 'Uploading to Server...' : 'Upload & Process Material 🚀'}
+          {loading ? 'Uploading & Analyzing...' : 'Upload & Process Material 🚀'}
         </button>
       </form>
     </div>
