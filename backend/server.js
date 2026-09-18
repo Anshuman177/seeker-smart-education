@@ -3,6 +3,9 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 
 const User = require('./models/User');
@@ -17,6 +20,24 @@ const app = express();
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ limit: '15mb', extended: true }));
 app.use(cors({ origin: '*' }));
+
+// Ensure uploads directory exists for Material Upload feature
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)){
+    fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + '-' + file.originalname);
+  }
+});
+
+const upload = multer({ storage: storage });
 
 app.get('/', (req, res) => {
   res.send('SEEKER Backend API is running successfully!');
@@ -962,7 +983,6 @@ app.post('/api/meet/room/:roomId/signal', auth(), async (req, res) => {
       return res.status(403).json({ message: 'Forbidden: You are not a participant of this meeting room.' });
     }
 
-    // Backend calculates receiver; never trust frontend payload.receiver
     const receiverId = (currentUserIdStr === studentAStr) ? studentBStr : studentAStr;
     if (!receiverId) {
       return res.status(400).json({ message: 'Target receiver could not be determined.' });
@@ -1004,7 +1024,6 @@ app.get('/api/meet/room/:roomId/signal', auth(), async (req, res) => {
       return res.status(403).json({ message: 'Forbidden: You are not a participant of this meeting room.' });
     }
 
-    // Return ONLY unacknowledged signals for the current user without deleting them permanently
     const unacknowledgedSignals = (meeting.signals || []).filter(
       sig => sig.receiver && sig.receiver.toString() === currentUserIdStr && !sig.acknowledged
     );
@@ -1016,7 +1035,6 @@ app.get('/api/meet/room/:roomId/signal', auth(), async (req, res) => {
   }
 });
 
-// Explicit Acknowledgment Endpoint to safely clear signals only after client processing
 app.post('/api/meet/room/:roomId/signal/ack', auth(), async (req, res) => {
   try {
     const { signalIds } = req.body;
@@ -1042,7 +1060,6 @@ app.post('/api/meet/room/:roomId/signal/ack', auth(), async (req, res) => {
     }
 
     if (updated) {
-      // Clean up fully acknowledged or old signals to prevent document bloat
       meeting.signals = meeting.signals.filter(
         sig => !sig.acknowledged || (Date.now() - sig.timestamp < 300000)
       );
@@ -1114,7 +1131,6 @@ app.put('/api/meet/room/:roomId/end', auth(), async (req, res) => {
   }
 });
 
-// Added Meeting Message Route supporting Chat & Shared Notes
 app.post('/api/meet/room/:roomId/message', auth(), async (req, res) => {
   try {
     const { message, sharedNotes } = req.body;
@@ -1200,6 +1216,34 @@ app.post('/api/studio/execute', auth(), async (req, res) => {
     res.json({ output });
   } catch (err) {
     res.status(500).json({ output: `Server execution error: ${err.message}` });
+  }
+});
+
+// ==========================================
+// 7. LEARN FROM YOUR MATERIAL — UPLOAD ENDPOINT
+// ==========================================
+
+app.post('/api/material/upload', upload.array('files'), (req, res) => {
+  try {
+    const { bookName, authorName, topic } = req.body;
+    const uploadedFiles = req.files;
+
+    if (!uploadedFiles || uploadedFiles.length === 0) {
+      return res.status(400).json({ error: 'Koi file upload nahi ki gayi hai.' });
+    }
+
+    console.log('Files received:', uploadedFiles.length);
+    console.log('Metadata:', { bookName, authorName, topic });
+
+    res.status(200).json({
+      message: 'Files successfully upload aur receive ho gayi hain!',
+      fileCount: uploadedFiles.length,
+      files: uploadedFiles.map(f => ({ originalName: f.originalname, filename: f.filename, size: f.size })),
+      metadata: { bookName, authorName, topic }
+    });
+  } catch (err) {
+    console.error('Upload error:', err);
+    res.status(500).json({ error: 'Server error during file upload.' });
   }
 });
 
