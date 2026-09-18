@@ -14,7 +14,8 @@ import {
   CheckCircle2, 
   AlertTriangle, 
   X, 
-  Trash2 
+  Trash2,
+  BookOpen
 } from 'lucide-react';
 
 export default function Navbar() {
@@ -65,7 +66,8 @@ export default function Navbar() {
     { name: 'StudyPath', path: '/studypath', icon: Compass },
     { name: 'SkillProof', path: '/skillproof', icon: Award },
     { name: 'StudySwap', path: '/studyswap', icon: Users },
-    { name: 'Studio', path: '/studio', icon: FileCode }
+    { name: 'Studio', path: '/studio', icon: FileCode },
+    { name: 'Learn Material', path: '/material-upload', icon: BookOpen } // <-- Naya link add kar diya
   ];
 
   return (
