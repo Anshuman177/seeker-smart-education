@@ -17,6 +17,7 @@ export default function MaterialUpload() {
 
   const [analysisData, setAnalysisData] = useState(null);
   const [analyzingLoading, setAnalyzingLoading] = useState(false);
+  const [quizLoading, setQuizLoading] = useState(false);
 
   // File selection handler with validation
   const handleFileChange = (e) => {
@@ -107,10 +108,25 @@ export default function MaterialUpload() {
       setAnalysisData(res.data);
     } catch (err) {
       console.error('Analysis error:', err);
-      // Agar backend se unreadable content ka error aaye, toh wahi message dikhayein
       setErrorMessage(err.response?.data?.error || 'Material upload ho gaya, lekin analysis load karne mein error aaya.');
     } finally {
       setAnalyzingLoading(false);
+    }
+  };
+
+  // Handler to generate and start quiz based on uploaded material
+  const handleStartQuiz = async () => {
+    if (!analysisData || !analysisData.materialId) return;
+    try {
+      setQuizLoading(true);
+      const res = await API.get(`/material/quiz/${analysisData.materialId}`);
+      console.H('Generated Material Quiz:', res.data);
+      alert(`Quiz generated successfully! Total questions: ${res.data.questions.length}. Redirecting to assessment...`);
+    } catch (err) {
+      console.error('Quiz generation error:', err);
+      setErrorMessage('Material quiz generate karne mein error aaya.');
+    } finally {
+      setQuizLoading(false);
     }
   };
 
@@ -153,7 +169,6 @@ export default function MaterialUpload() {
             ))}
           </ul>
 
-          {/* Conditional Optional Sections (Only show if actually present in material) */}
           {analysisData.diagramExplanation && (
             <div style={{ marginBottom: '20px' }}>
               <h4 style={{ color: '#38bdf8', marginBottom: '8px' }}>📊 Diagram Explanation:</h4>
@@ -181,6 +196,31 @@ export default function MaterialUpload() {
               <span>Target Questions: <strong>{analysisData.questionsCount} per section</strong></span>
             )}
           </div>
+
+          {/* QUIZ GENERATION CTA BUTTON */}
+          {analysisData.questionMode !== 'custom' && (
+            <div style={{ marginTop: '20px', textAlign: 'center' }}>
+              <button
+                type="button"
+                onClick={handleStartQuiz}
+                disabled={quizLoading}
+                style={{
+                  padding: '12px 24px',
+                  background: quizLoading ? '#555' : '#22c55e',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontWeight: 'bold',
+                  cursor: quizLoading ? 'not-allowed' : 'pointer',
+                  fontSize: '14px',
+                  boxShadow: '0 4px 12px rgba(34, 197, 94, 0.3)',
+                  width: '100%'
+                }}
+              >
+                {quizLoading ? 'Generating Material Quiz...' : `🎯 Take Material Assessment Quiz (${analysisData.questionsCount || 5} Questions)`}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -226,7 +266,6 @@ export default function MaterialUpload() {
             />
           </div>
 
-          {/* Question Mode Selection & Optional Question Section */}
           <div style={{ borderTop: '1px solid #333', paddingTop: '15px', marginBottom: '15px' }}>
             <label style={{ display: 'block', fontSize: '13px', marginBottom: '8px', color: '#ccc', fontWeight: 'bold' }}>
               Question Approach Selection:
@@ -242,7 +281,6 @@ export default function MaterialUpload() {
             </select>
           </div>
 
-          {/* Question Section - Hides completely if 'custom' is selected */}
           {questionMode !== 'custom' && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', borderTop: '1px solid #333', paddingTop: '15px' }}>
               <div>
