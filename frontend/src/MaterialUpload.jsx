@@ -9,11 +9,14 @@ export default function MaterialUpload() {
   const [topic, setTopic] = useState('');
   const [questionsCount, setQuestionsCount] = useState(5);
   const [marksPerQuestion, setMarksPerQuestion] = useState('');
+
+
+  const [questionMode, setQuestionMode] = useState('auto'); // 'auto', 'existing', 'custom'
+
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Naya state analysis view ke liye
   const [analysisData, setAnalysisData] = useState(null);
   const [analyzingLoading, setAnalyzingLoading] = useState(false);
 
@@ -30,7 +33,7 @@ export default function MaterialUpload() {
         file.type.includes('document') ||
         file.type.includes('text');
 
-      const isValidSize = file.size <= 10 * 1024 * 1024; // 10MB limit per file
+      const isValidSize = file.size <= 10 * 1024 * 1024;
 
       if (!isValidType) {
         setErrorMessage('Kuch files unsupported type ki hain. Kripya PDF ya Images upload karein.');
@@ -46,12 +49,10 @@ export default function MaterialUpload() {
     setFiles((prevFiles) => [...prevFiles, ...validFiles]);
   };
 
-  // Remove individual file option
   const handleRemoveFile = (indexToRemove) => {
     setFiles(files.filter((_, index) => index !== indexToRemove));
   };
 
-  // Submit / Upload handler to backend
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMessage('');
@@ -70,8 +71,9 @@ export default function MaterialUpload() {
     formData.append('bookName', bookName);
     formData.append('authorName', authorName);
     formData.append('topic', topic);
-    formData.append('questionsCount', questionsCount);
+    formData.append('questionsCount', questionMode === 'custom' ? 0 : questionsCount);
     formData.append('marksPerQuestion', marksPerQuestion);
+    formData.append('questionMode', questionMode);
 
     try {
       setLoading(true);
@@ -84,7 +86,6 @@ export default function MaterialUpload() {
       setSuccessMessage(res.data.message || 'Study material successfully uploaded and ready for learning! 🚀');
       const uploadedMaterialId = res.data.materialId;
 
-      // Jaise hi upload ho, turant material analyze karne ki API call lagayein
       if (uploadedMaterialId) {
         fetchMaterialAnalysis(uploadedMaterialId);
       }
@@ -101,7 +102,6 @@ export default function MaterialUpload() {
     }
   };
 
-  // Material Analyze karne ki function
   const fetchMaterialAnalysis = async (id) => {
     try {
       setAnalyzingLoading(true);
@@ -132,7 +132,6 @@ export default function MaterialUpload() {
         </div>
       )}
 
-      {/* AGAR ANALYSIS DATA MIL GAYA HAI TOH "WHAT IS THIS MATERIAL ABOUT?" SECTION DIKHAYEIN */}
       {analysisData && (
         <div style={{ background: '#1e1e2f', padding: '25px', borderRadius: '8px', border: '1px solid #4f46e5', marginTop: '20px', marginBottom: '30px' }}>
           <h3 style={{ color: '#818cf8', marginBottom: '15px' }}>📖 What is this material about?</h3>
@@ -155,15 +154,17 @@ export default function MaterialUpload() {
           </ul>
 
           <div style={{ marginTop: '20px', padding: '12px', background: '#252538', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#aaa' }}>
-            <span>Target Questions: <strong>{analysisData.questionsCount} per section</strong></span>
-            <span>Assigned Marks: <strong>{analysisData.marksPerQuestion || 'Auto-decided'}</strong></span>
+            <span>Question Mode: <strong style={{ color: '#38bdf8' }}>{analysisData.questionMode?.toUpperCase()}</strong></span>
+            {analysisData.questionMode !== 'custom' && (
+              <span>Target Questions: <strong>{analysisData.questionsCount} per section</strong></span>
+            )}
           </div>
         </div>
       )}
 
       {analyzingLoading && (
         <div style={{ textAlign: 'center', padding: '20px', color: '#818cf8', fontWeight: 'bold' }}>
-          ⚡ Analyzing uploaded material and extracting concepts...
+          ⚡ Analyzing uploaded material, checking for existing questions, and extracting concepts...
         </div>
       )}
 
@@ -203,33 +204,52 @@ export default function MaterialUpload() {
             />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', borderTop: '1px solid #333', paddingTop: '15px' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '13px', marginBottom: '5px', color: '#ccc' }}>
-                Questions per section:
-              </label>
-              <input
-                type="number"
-                min="1"
-                max="20"
-                value={questionsCount}
-                onChange={(e) => setQuestionsCount(e.target.value)}
-                style={{ width: '100%', padding: '8px', borderRadius: '4px', background: '#2a2a3d', border: '1px solid #444', color: '#fff' }}
-              />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '13px', marginBottom: '5px', color: '#ccc' }}>
-                Marks per question (Optional):
-              </label>
-              <input
-                type="text"
-                placeholder="e.g. 5 Marks"
-                value={marksPerQuestion}
-                onChange={(e) => setMarksPerQuestion(e.target.value)}
-                style={{ width: '100%', padding: '8px', borderRadius: '4px', background: '#2a2a3d', border: '1px solid #444', color: '#fff' }}
-              />
-            </div>
+          {/* Question Mode Selection & Optional Question Section */}
+          <div style={{ borderTop: '1px solid #333', paddingTop: '15px', marginBottom: '15px' }}>
+            <label style={{ display: 'block', fontSize: '13px', marginBottom: '8px', color: '#ccc', fontWeight: 'bold' }}>
+              Question Approach Selection:
+            </label>
+            <select
+              value={questionMode}
+              onChange={(e) => setQuestionMode(e.target.value)}
+              style={{ width: '100%', padding: '9px', borderRadius: '4px', background: '#2a2a3d', border: '1px solid #444', color: '#fff', marginBottom: '12px' }}
+            >
+              <option value="auto">Auto-Decide (Smart material-based questions)</option>
+              <option value="existing">Use Existing Questions from Material (if available)</option>
+              <option value="custom">Custom (Hide/Disable Question Section)</option>
+            </select>
           </div>
+
+          {/* Question Section - Hides completely if 'custom' is selected */}
+          {questionMode !== 'custom' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', borderTop: '1px solid #333', paddingTop: '15px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', marginBottom: '5px', color: '#ccc' }}>
+                  Questions per section:
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="20"
+                  value={questionsCount}
+                  onChange={(e) => setQuestionsCount(e.target.value)}
+                  style={{ width: '100%', padding: '8px', borderRadius: '4px', background: '#2a2a3d', border: '1px solid #444', color: '#fff' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', marginBottom: '5px', color: '#ccc' }}>
+                  Marks per question (Optional):
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. 5 Marks"
+                  value={marksPerQuestion}
+                  onChange={(e) => setMarksPerQuestion(e.target.value)}
+                  style={{ width: '100%', padding: '8px', borderRadius: '4px', background: '#2a2a3d', border: '1px solid #444', color: '#fff' }}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Preview Section */}
