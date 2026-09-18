@@ -66,7 +66,8 @@ export default function MaterialUpload() {
 
     try {
       setLoading(true);
-      const res = await API.post('/api/material/upload', formData, {
+      // FIXED: Removed duplicate '/api' prefix to prevent 404 error
+      const res = await API.post('/material/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
