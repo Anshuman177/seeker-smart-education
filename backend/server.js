@@ -1283,8 +1283,8 @@ app.get('/api/material/analyze/:id', auth(), async (req, res) => {
       extractedText = fileDoc.data.toString('utf8').trim();
     }
 
-    // Check if extracted text contains binary zip/XML garbage (e.g. PPTX/DOCX archives)
-    const isBinaryGarbage = extractedText.includes('PK') || extractedText.includes('ppt/') || extractedText.includes('word/') || (extractedText.match(//g) || []).length > 5;
+    // Safe Binary Garbage Check (No invalid regex)
+    const isBinaryGarbage = extractedText.includes('PK') || extractedText.includes('ppt/') || extractedText.includes('word/');
 
     if (!extractedText || extractedText.length < 20 || isBinaryGarbage) {
       const subjectHint = material.topic || material.bookName || fileDoc.originalName;
