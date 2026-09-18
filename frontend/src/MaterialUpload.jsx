@@ -9,8 +9,6 @@ export default function MaterialUpload() {
   const [topic, setTopic] = useState('');
   const [questionsCount, setQuestionsCount] = useState(5);
   const [marksPerQuestion, setMarksPerQuestion] = useState('');
-
-
   const [questionMode, setQuestionMode] = useState('auto'); // 'auto', 'existing', 'custom'
 
   const [errorMessage, setErrorMessage] = useState('');
@@ -109,7 +107,8 @@ export default function MaterialUpload() {
       setAnalysisData(res.data);
     } catch (err) {
       console.error('Analysis error:', err);
-      setErrorMessage('Material upload ho gaya, lekin analysis load karne mein error aaya.');
+      // Agar backend se unreadable content ka error aaye, toh wahi message dikhayein
+      setErrorMessage(err.response?.data?.error || 'Material upload ho gaya, lekin analysis load karne mein error aaya.');
     } finally {
       setAnalyzingLoading(false);
     }
@@ -132,6 +131,7 @@ export default function MaterialUpload() {
         </div>
       )}
 
+      {/* ANALYSIS DISPLAY SECTION — DYNAMIC & CONDITIONALLY RENDERED */}
       {analysisData && (
         <div style={{ background: '#1e1e2f', padding: '25px', borderRadius: '8px', border: '1px solid #4f46e5', marginTop: '20px', marginBottom: '30px' }}>
           <h3 style={{ color: '#818cf8', marginBottom: '15px' }}>📖 What is this material about?</h3>
@@ -147,11 +147,33 @@ export default function MaterialUpload() {
           </ul>
 
           <h4 style={{ color: '#38bdf8', marginBottom: '10px' }}>📌 Important Points:</h4>
-          <ul style={{ paddingLeft: '20px', color: '#ccc' }}>
+          <ul style={{ paddingLeft: '20px', marginBottom: '20px', color: '#ccc' }}>
             {analysisData.importantPoints.map((point, index) => (
               <li key={index} style={{ marginBottom: '8px', lineHeight: '1.4' }}>{point}</li>
             ))}
           </ul>
+
+          {/* Conditional Optional Sections (Only show if actually present in material) */}
+          {analysisData.diagramExplanation && (
+            <div style={{ marginBottom: '20px' }}>
+              <h4 style={{ color: '#38bdf8', marginBottom: '8px' }}>📊 Diagram Explanation:</h4>
+              <p style={{ color: '#ccc', lineHeight: '1.4' }}>{analysisData.diagramExplanation}</p>
+            </div>
+          )}
+
+          {analysisData.graphExplanation && (
+            <div style={{ marginBottom: '20px' }}>
+              <h4 style={{ color: '#38bdf8', marginBottom: '8px' }}>📈 Graph Explanation:</h4>
+              <p style={{ color: '#ccc', lineHeight: '1.4' }}>{analysisData.graphExplanation}</p>
+            </div>
+          )}
+
+          {analysisData.formulaExplanation && (
+            <div style={{ marginBottom: '20px' }}>
+              <h4 style={{ color: '#38bdf8', marginBottom: '8px' }}>🧮 Formula Explanation:</h4>
+              <p style={{ color: '#ccc', lineHeight: '1.4' }}>{analysisData.formulaExplanation}</p>
+            </div>
+          )}
 
           <div style={{ marginTop: '20px', padding: '12px', background: '#252538', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#aaa' }}>
             <span>Question Mode: <strong style={{ color: '#38bdf8' }}>{analysisData.questionMode?.toUpperCase()}</strong></span>
@@ -164,7 +186,7 @@ export default function MaterialUpload() {
 
       {analyzingLoading && (
         <div style={{ textAlign: 'center', padding: '20px', color: '#818cf8', fontWeight: 'bold' }}>
-          ⚡ Analyzing uploaded material, checking for existing questions, and extracting concepts...
+          ⚡ Analyzing uploaded material, reading actual document content, and extracting concepts...
         </div>
       )}
 
