@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const pdfParse = require('pdf-parse');
 require('dotenv').config();
 
 const User = require('./models/User');
@@ -1214,7 +1215,7 @@ app.post('/api/studio/execute', auth(), async (req, res) => {
 
 app.post('/api/material/upload', auth(), upload.array('files', 5), async (req, res) => {
   try {
-    const { bookName, authorName, topic, questionsCount, marksPerQuestion } = req.body;
+    const { bookName, authorName, topic, questionsCount, marksPerQuestion, questionMode } = req.body;
     const uploadedFiles = req.files;
 
     if (!uploadedFiles || uploadedFiles.length === 0) {
@@ -1241,6 +1242,7 @@ app.post('/api/material/upload', auth(), upload.array('files', 5), async (req, r
       topic: topic || '',
       questionsCount: parseInt(questionsCount, 10) || 5,
       marksPerQuestion: marksPerQuestion || '',
+      questionMode: questionMode || 'auto',
       files: fileDocuments
     });
 
@@ -1256,43 +1258,93 @@ app.post('/api/material/upload', auth(), upload.array('files', 5), async (req, r
     res.status(500).json({ error: 'Server error during file upload to database.' });
   }
 });
+
 // ==========================================
-// 8. LEARN FROM YOUR MATERIAL — ANALYSIS & STUDY FLOW
+// 8. LEARN FROM YOUR MATERIAL — REAL CONTENT ANALYSIS & EXTRACTION
 // ==========================================
 
 app.get('/api/material/analyze/:id', auth(), async (req, res) => {
   try {
     const material = await Material.findOne({ _id: req.params.id, userId: req.user.id });
-    if (!material) {
-      return res.status(404).json({ error: 'Study material nahi mila ya yeh aapka material nahi hai.' });
+    if (!material || !material.files || material.files.length === 0) {
+      return res.status(404).json({ error: 'Study material nahi mila ya file empty hai.' });
     }
 
-    // Material ke content ya topic ke basis par real analysis data taiyar karna
-    const title = material.topic || material.bookName || 'Uploaded Learning Document';
+    const fileDoc = material.files[0];
+    let extractedText = '';
+
+    // Extract actual text from PDF buffer
+    if (fileDoc.mimeType === 'application/pdf' || fileDoc.originalName.toLowerCase().endsWith('.pdf')) {
+      try {
+        const parsedPdf = await pdfParse(fileDoc.data);
+        extractedText = parsedPdf.text ? parsedPdf.text.trim() : '';
+      } catch (pdfErr) {
+        console.error('PDF parsing error:', pdfErr);
+      }
+    } else {
+      extractedText = fileDoc.data.toString('utf8').trim();
+    }
+
+    // If text cannot be read properly, return the required strict error message
+    if (!extractedText || extractedText.length < 20) {
+      return res.status(422).json({ 
+        error: 'SEEKER could not read enough content from this material. Please upload a clearer file/page.' 
+      });
+    }
+
+    const cleanedText = extractedText.replace(/\s+/g, ' ');
+    const sentences = cleanedText.split('. ').filter(s => s.trim().length > 10);
+    
+    // Dynamically generate real summary from text
+    const dynamicAbout = sentences.length > 0 
+      ? `This material primarily discusses: "${sentences.slice(0, 2).join('. ')}." It elaborates on core definitions, structural properties, and key functional aspects found within the source pages.`
+      : `This material contains technical documentation regarding ${material.topic || material.bookName || 'the uploaded subject'}.`;
+
+    const importantConcepts = sentences.length >= 3 
+      ? sentences.slice(2, 5).map(s => `Core concept identified: ${s.trim()}`)
+      : [
+          `Primary subject matter derived from: ${cleanedText.substring(0, 120)}...`,
+          `Key operational definitions and structural terms present in the text.`
+        ];
+
+    const importantPoints = [
+      `Extracted directly from file: ${fileDoc.originalName}`,
+      `Total content analyzed: ~${Math.round(fileDoc.size / 1024)} KB of document data.`
+    ];
+
+    let diagramExplanation = null;
+    let graphExplanation = null;
+    let formulaExplanation = null;
+
+    const lowerText = cleanedText.toLowerCase();
+    if (lowerText.includes('diagram') || lowerText.includes('figure') || lowerText.includes('illustration')) {
+      diagramExplanation = 'The uploaded material references structural diagrams or visual figures illustrating the architecture and component layouts.';
+    }
+    if (lowerText.includes('graph') || lowerText.includes('chart') || lowerText.includes('axis')) {
+      graphExplanation = 'The material includes analytical graphical data showing trends, performance metrics, or comparative relationships.';
+    }
+    if (lowerText.includes('formula') || lowerText.includes('equation') || (lowerText.includes('where') && lowerText.includes('='))) {
+      formulaExplanation = 'Mathematical expressions or governing formulas were detected in the source text, defining quantitative relationships.';
+    }
 
     const analysisResult = {
       materialId: material._id,
-      about: `This material explains the core principles and fundamental concepts related to ${title}. It outlines structured guidelines, key definitions, and essential operational workflows as defined in the source document.`,
-      importantConcepts: [
-        `Core theoretical definitions and foundational principles of ${title}.`,
-        `Structured operational mechanisms and workflow processes.`,
-        `Key architectural or functional relationships between components.`
-      ],
-      importantPoints: [
-        `Maintained exact alignment with the uploaded source text.`,
-        `Exam-oriented breakdown designed for thorough user understanding.`
-      ],
-      diagramExplanation: null,
-      graphExplanation: null,
-      formulaExplanation: null,
+      fileName: fileDoc.originalName,
+      about: dynamicAbout,
+      importantConcepts,
+      importantPoints,
+      diagramExplanation,
+      graphExplanation,
+      formulaExplanation,
+      questionMode: material.questionMode || 'auto',
       questionsCount: material.questionsCount || 5,
       marksPerQuestion: material.marksPerQuestion || '5 Marks'
     };
 
     res.status(200).json(analysisResult);
   } catch (err) {
-    console.error('Material analysis error:', err);
-    res.status(500).json({ error: 'Server error while analyzing material.' });
+    console.error('Real material analysis error:', err);
+    res.status(500).json({ error: 'Server error while analyzing material content.' });
   }
 });
 
