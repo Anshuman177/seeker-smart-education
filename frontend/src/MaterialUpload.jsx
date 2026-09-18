@@ -114,13 +114,13 @@ export default function MaterialUpload() {
     }
   };
 
-  // Handler to generate and start quiz based on uploaded material
+  // Handler to generate and start quiz based on uploaded material (Fixed console.log)
   const handleStartQuiz = async () => {
     if (!analysisData || !analysisData.materialId) return;
     try {
       setQuizLoading(true);
       const res = await API.get(`/material/quiz/${analysisData.materialId}`);
-      console.H('Generated Material Quiz:', res.data);
+      console.log('Generated Material Quiz:', res.data);
       alert(`Quiz generated successfully! Total questions: ${res.data.questions.length}. Redirecting to assessment...`);
     } catch (err) {
       console.error('Quiz generation error:', err);
