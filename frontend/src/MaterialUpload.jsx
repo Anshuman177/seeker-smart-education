@@ -7,6 +7,8 @@ export default function MaterialUpload() {
   const [bookName, setBookName] = useState('');
   const [authorName, setAuthorName] = useState('');
   const [topic, setTopic] = useState('');
+  const [questionsCount, setQuestionsCount] = useState(5);
+  const [marksPerQuestion, setMarksPerQuestion] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [loading, setLoading] = useState(false);
@@ -63,21 +65,24 @@ export default function MaterialUpload() {
     formData.append('bookName', bookName);
     formData.append('authorName', authorName);
     formData.append('topic', topic);
+    formData.append('questionsCount', questionsCount);
+    formData.append('marksPerQuestion', marksPerQuestion);
 
     try {
       setLoading(true);
-      // FIXED: Removed duplicate '/api' prefix to prevent 404 error
       const res = await API.post('/material/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
       });
 
-      setSuccessMessage(res.data.message || 'Files successfully uploaded!');
+      setSuccessMessage(res.data.message || 'Study material successfully uploaded and ready for learning! 🚀');
       setFiles([]);
       setBookName('');
       setAuthorName('');
       setTopic('');
+      setQuestionsCount(5);
+      setMarksPerQuestion('');
     } catch (err) {
       console.error('Upload error:', err);
       setErrorMessage(err.response?.data?.error || 'Server error during file upload. Dobara koshish karein.');
@@ -115,7 +120,7 @@ export default function MaterialUpload() {
             style={{ marginBottom: '15px', display: 'block' }}
           />
 
-          <div style={{ display: 'grid', gap: '10px', marginBottom: '5px' }}>
+          <div style={{ display: 'grid', gap: '10px', marginBottom: '15px' }}>
             <input
               type="text"
               placeholder="Book Name (Optional)"
@@ -137,6 +142,35 @@ export default function MaterialUpload() {
               onChange={(e) => setTopic(e.target.value)}
               style={{ padding: '8px', borderRadius: '4px', background: '#2a2a3d', border: '1px solid #444', color: '#fff' }}
             />
+          </div>
+
+          {/* Naye Inputs: Questions count aur Marks per question */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', borderTop: '1px solid #333', paddingTop: '15px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', marginBottom: '5px', color: '#ccc' }}>
+                Questions per section:
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="20"
+                value={questionsCount}
+                onChange={(e) => setQuestionsCount(e.target.value)}
+                style={{ width: '100%', padding: '8px', borderRadius: '4px', background: '#2a2a3d', border: '1px solid #444', color: '#fff' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', marginBottom: '5px', color: '#ccc' }}>
+                Marks per question (Optional):
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. 5 Marks"
+                value={marksPerQuestion}
+                onChange={(e) => setMarksPerQuestion(e.target.value)}
+                style={{ width: '100%', padding: '8px', borderRadius: '4px', background: '#2a2a3d', border: '1px solid #444', color: '#fff' }}
+              />
+            </div>
           </div>
         </div>
 
